@@ -1,0 +1,12 @@
+{application, xylan,
+ [
+  {description, ""},
+  {vsn, git},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { xylan_app, []}},
+  {env, []}
+ ]}.
