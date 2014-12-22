@@ -1,5 +1,5 @@
-ProXY Wedding
-=============
+xylan (aka proXY wedding)
+=========================
 
 Proxy wedding service is a service where you can
 start a server side in the network and the client
