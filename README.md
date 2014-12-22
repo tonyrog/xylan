@@ -44,7 +44,7 @@ Example server config:
        ]}
      ]}
 
-Client routing:  ("local1")
+Client routing:  "home"
 
     %% config
     {xylan,
