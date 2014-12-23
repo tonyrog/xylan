@@ -410,6 +410,7 @@ match([{data,RE}|R], RouteInfo) ->
 match([{dst_ip,RE}|R], RouteInfo) ->
     case proplists:get_value(dst_ip, RouteInfo) of
 	undefined -> false;
+	RE -> true;
 	IP when is_tuple(IP) -> match_data(inet:ntoa(IP), RE, R, RouteInfo);
 	IP when is_list(IP) ->  match_data(IP, RE, R, RouteInfo);
 	_ -> false
@@ -425,6 +426,7 @@ match([{dst_port,RE}|R], RouteInfo) ->
 match([{src_ip,RE}|R], RouteInfo) ->
     case proplists:get_value(src_ip, RouteInfo) of
 	undefined -> false;
+	RE -> true;
 	IP when is_tuple(IP) -> match_data(inet:ntoa(IP), RE, R, RouteInfo);
 	IP when is_list(IP) ->  match_data(IP, RE, R, RouteInfo);
 	_ -> false
@@ -442,7 +444,9 @@ match([M|_R], _RouteInfo) ->
     false;
 match([], _RouteInfo) ->
     true.
-	     
+
+match_data(String, RE, R, RouteInfo) when is_integer(RE) -> 
+    match_data(String, integer_to_list(RE), R, RouteInfo);
 match_data(String, RE, R, RouteInfo) ->	
     case re:run(String,RE) of
 	{match,_} -> match(R, RouteInfo);
