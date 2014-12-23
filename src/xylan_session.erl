@@ -139,7 +139,8 @@ handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
       State#state.client_auth =:= false ->
     ?debug("auth_req: ~p", [_Req]),
     Chal1 = crypto:rand_bytes(16),  %% generate challenge
-    Cred = crypto:hash(sha,[State#state.server_key,Chal]), %% server cred
+    %% crypto:sha is used instead of crypto:hash R15!!
+    Cred = crypto:sha([State#state.server_key,Chal]), %% server cred
     send(State#state.socket, {auth_res,[{id,State#state.server_id},{chal,Chal1},{cred,Cred}]}),
     {noreply, State#state { client_chal = Chal1 }};
 handle_cast(Route={route,_DataPort,_SessionKey,_RouteInfo}, State) when
@@ -169,7 +170,8 @@ handle_info({Tag,Socket,Data}, State) when
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_ack, [{id,_ClientID},{cred,Cred}]} ->
 	    ?debug("auth_ack: ~p", [_Mesg]),
-	    case crypto:hash(sha,[State#state.client_key,State#state.client_chal]) of
+	    %% crypto:sha is used instead of crypto:hash R15!!
+	    case crypto:sha([State#state.client_key,State#state.client_chal]) of
 		Cred ->
 		    ?debug("handle_info: credential success client:~p", [State#state.client_id]),
 		    exo_socket:setopts(State#state.socket, [{active,once}]),

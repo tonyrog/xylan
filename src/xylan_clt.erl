@@ -181,11 +181,13 @@ handle_info(_Info={Tag,Socket,Data}, State) when
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_res,[{id,ServerID},{chal,Chal},{cred,Cred}]} -> %% auth and cred from server
 	    ?debug("auth_res: ~p ok", [_Mesg]),
-	    case crypto:hash(sha,[State#state.server_key,State#state.server_chal]) of
+	    %% crypto:sha is used instead of crypto:hash R15!!
+	    case crypto:sha([State#state.server_key,State#state.server_chal]) of
 		Cred ->
 		    ?debug("handle_info: credential from server ~p ok", [ServerID]),
 		    cancel_timer(State#state.auth),
-		    Cred1 = crypto:hash(sha,[State#state.client_key,Chal]),
+		    %% crypto:sha is used instead of crypto:hash R15!!
+		    Cred1 = crypto:sha([State#state.client_key,Chal]),
 		    send(State#state.server_sock, {auth_ack,[{id,State#state.id},{cred,Cred1}]}),
 		    Ping = erlang:start_timer(State#state.ping_interval, self(), ping),
 		    {noreply, State#state { server_id = ServerID, server_auth = true,
