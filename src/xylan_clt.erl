@@ -192,7 +192,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 					    auth = undefined, ping = Ping }};
 		_CredFail ->
 		    ?debug("handle_info: credential failed"),
-		    exo_socket:close(State#state.server_sock),
+		    close(State#state.server_sock),
 		    TRef = reconnect_after(State#state.reconnect_interval),
 		    {noreply, State#state { server_sock=undefined, server_auth=false,
 					    reconnect=TRef }}
@@ -253,7 +253,7 @@ handle_info(_Info={Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.server_sock)#exo_socket.socket ->
     ?debug("handle_info: (control channel) ~p", [_Info]),
-    exo_socket:close(State#state.server_sock),
+    close(State#state.server_sock),
     cancel_timer(State#state.auth),
     cancel_timer(State#state.pong),
     cancel_timer(State#state.ping),
@@ -266,7 +266,7 @@ handle_info(_Info={Tag,Socket,_Error}, State) when
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.server_sock)#exo_socket.socket ->
     ?debug("handle_info: (data channel) ~p", [_Info]),
-    exo_socket:close(State#state.server_sock),
+    close(State#state.server_sock),
     cancel_timer(State#state.auth),
     cancel_timer(State#state.pong),
     cancel_timer(State#state.ping),
@@ -315,7 +315,7 @@ handle_info({timeout,T,ping}, State) when T =:= State#state.ping ->
 handle_info({timeout,T,pong}, State) when T =:= State#state.pong ->
     if State#state.server_sock =/= undefined ->
 	    ?debug("pong timeout reconnect socket"),
-	    exo_socket:close(State#state.server_sock),
+	    close(State#state.server_sock),
 	    TRef = reconnect_after(State#state.reconnect_interval),
 	    {noreply, State#state { server_sock=undefined, pong=undefined,reconnect=TRef}};
        true ->
@@ -326,11 +326,7 @@ handle_info({timeout,T,pong}, State) when T =:= State#state.pong ->
 handle_info({timeout,T,auth_timeout}, State) when T =:= State#state.auth ->
     ?debug("auth timeout, reconnect"),
     TRef = reconnect_after(State#state.reconnect_interval),
-    if State#state.server_sock =/= undefined ->
-	    exo_socket:close(State#state.server_sock);
-       true ->
-	    ok
-    end,
+    close(State#state.server_sock),
     {noreply, State#state { server_sock=undefined, auth=undefined, reconnect=TRef}};
 
 handle_info(_Info, State) ->
@@ -365,6 +361,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+close(undefined) -> ok;
+close(Socket) -> exo_socket:close(Socket).
 
 cancel_timer(undefined) -> false;
 cancel_timer(Timer) -> erlang:cancel_timer(Timer).

@@ -118,11 +118,7 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({set_socket, Socket}, State) ->
-    if State#state.socket =/= undefined ->
-	    exo_socket:close(State#state.socket); %% close old socket
-       true ->
-	    ok
-    end,
+    close(State#state.socket),  %% close old socket
     {T,C,E} = exo_socket:tags(Socket),
     exo_socket:setopts(Socket, [{active,once}]),
     Timeout = State#state.auth_timeout,
@@ -181,18 +177,18 @@ handle_info({Tag,Socket,Data}, State) when
 		    {noreply, State#state { auth_timer = undefined, client_auth = true }};
 		_CredFail ->
 		    ?debug("handle_info: credential failed"),
-		    exo_socket:close(State#state.socket),
+		    close(State#state.socket),
 		    {noreply, State#state { socket = undefined,
 					    client_auth = false}}
 	    end;
 	_Mesg ->
-	    exo_socket:close(State#state.socket),
+	    close(State#state.socket),
 	    ?warning("unknown message: ~p", [_Mesg]),
 	    {noreply, State#state { socket = undefined, client_auth = false}}
     catch
 	error:Reason ->
 	    ?error("bad session data ~p", [{error,Reason}]),
-	    exo_socket:close(State#state.socket),
+	    close(State#state.socket),
 	    {noreply, State#state { socket = undefined, client_auth = false}}
     end;
 
@@ -211,7 +207,7 @@ handle_info({Tag,Socket,Data}, State) when
     catch
 	error:Reason ->
 	    ?error("bad session data ~p", [{error,Reason}]),
-	    exo_socket:close(State#state.socket),
+	    close(State#state.socket),
 	    {noreply, State#state { socket = undefined, client_auth = false}}
     end;
 
@@ -219,7 +215,7 @@ handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.socket)#exo_socket.socket ->
     ?debug("client session closed", []),
-    exo_socket:close(State#state.socket),
+    close(State#state.socket),
     cancel_timer(State#state.auth_timer),
     {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
 
@@ -227,14 +223,14 @@ handle_info({Tag,Socket,Error}, State) when
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.socket)#exo_socket.socket ->
     ?debug("client socket error ~p", [Error]),
-    exo_socket:close(State#state.socket),
+    close(State#state.socket),
     cancel_timer(State#state.auth_timer),
     {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
 
 handle_info({timeout,TRef,auth_timeout}, State) when 
       TRef =:= State#state.auth_timer ->
     ?debug("authentication timeout"),
-    exo_socket:close(State#state.socket),
+    close(State#state.socket),
     {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
 
 handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) when
@@ -259,11 +255,7 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
     ?debug("terminate ~p", [_Reason]),
-    if State#state.socket =/= undefined ->
-	    ?debug("terminate close client session"),
-	    exo_socket:close(State#state.socket);
-       true -> ok
-    end,
+    close(State#state.socket),
     ok.
 
 %%--------------------------------------------------------------------
@@ -280,6 +272,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+close(undefined) -> ok;
+close(Socket) -> exo_socket:close(Socket).
 
 cancel_timer(Timer) when is_reference(Timer) -> 
     erlang:cancel_timer(Timer);
