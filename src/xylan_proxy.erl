@@ -33,20 +33,21 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-include_lib("lager/include/log.hrl").
+-include_lib("xylan_socket.hrl").
+
 -record(state, {
 	  session_key = <<>> :: binary(),
 	  tag_a=tcp, tag_a_closed=tcp_closed, tag_a_error=tcp_error,
 	  tag_b=tcp, tag_b_closed=tcp_closed, tag_b_error=tcp_error,
 	  parent :: pid(),
 	  initial :: binary(),     %% first binary "packet"
-	  a_sock :: exo_socket:exo_socket(),  %% user socket
+	  a_sock :: xylan_socket(),  %% user socket
 	  a_closed = false :: boolean(),
-	  b_sock :: exo_socket:exo_socket(),  %% client socket (when connected)
+	  b_sock :: xylan_socket(),  %% client socket (when connected)
 	  b_closed = false :: boolean()
 	 }).
 
--include_lib("lager/include/log.hrl").
--include_lib("exo/src/exo_socket.hrl").
 
 %%%===================================================================
 %%% API
@@ -115,20 +116,20 @@ handle_call(_Request, _From, State) ->
 %%--------------------------------------------------------------------
 handle_cast({set_a,Socket}, State) ->
     ?debug("handle_cast: set_a"),
-    {T,C,E} = exo_socket:tags(Socket),
-    exo_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
+    {T,C,E} = xylan_socket:tags(Socket),
+    xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
     %% FIXME: try route match based only on socket info !
     {noreply, State#state { a_sock = Socket,
 			    a_closed = false,
 			    tag_a=T, tag_a_closed=C, tag_a_error=E}};
 handle_cast({set_b,Socket}, State) ->
     ?debug("handle_cast: set_b, send ~p",[State#state.initial]),
-    {T,C,E} = exo_socket:tags(Socket),
-    exo_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
+    {T,C,E} = xylan_socket:tags(Socket),
+    xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
     %% reactiveate the a side
-    exo_socket:setopts(State#state.a_sock, [{active,once}]),
+    xylan_socket:setopts(State#state.a_sock, [{active,once}]),
     %% this will kick the activity
-    exo_socket:send(Socket, State#state.initial),
+    xylan_socket:send(Socket, State#state.initial),
     {noreply, State#state { b_sock = Socket,
 			    b_closed = false,
 			    tag_b=T, tag_b_closed=C, tag_b_error=E}};
@@ -136,19 +137,19 @@ handle_cast({set_b,Socket}, State) ->
 handle_cast({connect,LIP,LPort,RIP,RPort}, State) ->
     LOptions = [{mode,binary},{packet,0},{nodelay,true}],
     ?debug("handle_cast: connect: ~p:~w <-> ~p:~w",[LIP,LPort,RIP,RPort]),
-    case exo_socket:connect(LIP,LPort,LOptions,3000) of
+    case xylan_socket:connect(LIP,LPort,LOptions,3000) of
 	{ok,A} ->
 	    ?debug("A is connected"),
 	    ROptions = [{mode,binary},{packet,4},{nodelay,true}],
-	    case exo_socket:connect(RIP,RPort,ROptions,3000) of
+	    case xylan_socket:connect(RIP,RPort,ROptions,3000) of
 		{ok,B} ->
 		    ?debug("B is connected"),
 		    %% FIXME make better and signed!
-		    exo_socket:send(B, State#state.session_key),
-		    exo_socket:setopts(B,[{packet,0},{active,once}]),
-		    exo_socket:setopts(A,[{active,once}]),
-		    {Ta,Ca,Ea} = exo_socket:tags(A),
-		    {Tb,Cb,Eb} = exo_socket:tags(B),
+		    xylan_socket:send(B, State#state.session_key),
+		    xylan_socket:setopts(B,[{packet,0},{active,once}]),
+		    xylan_socket:setopts(A,[{active,once}]),
+		    {Ta,Ca,Ea} = xylan_socket:tags(A),
+		    {Tb,Cb,Eb} = xylan_socket:tags(B),
 		    State1 = State#state { b_sock = B,
 					   b_closed = false,
 					   tag_b=Tb, tag_b_closed=Cb, tag_b_error=Eb,
@@ -157,7 +158,7 @@ handle_cast({connect,LIP,LPort,RIP,RPort}, State) ->
 					   tag_a=Ta, tag_a_closed=Ca, tag_a_error=Ea},
 		    {noreply, State1};
 		_Error ->
-		    exo_socket:close(A),
+		    xylan_socket:close(A),
 		    ?warning("unable to connect B side to ~p:~p error:~p", 
 		     [RIP,RPort,_Error]),
 		    {stop, normal, State}
@@ -186,56 +187,56 @@ handle_cast(_Msg, State) ->
 %% data from A (user) before proxy is connected
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_a,
-      Socket =:= (State#state.a_sock)#exo_socket.socket ->
+      Socket =:= (State#state.a_sock)#xylan_socket.socket ->
     if State#state.b_sock =:= undefined ->
-	    {ok,{LocalIP,LocalPort}} = exo_socket:sockname(State#state.a_sock),
-	    {ok,{RemoteIP,RemotePort}} = exo_socket:peername(State#state.a_sock),
+	    {ok,{LocalIP,LocalPort}} = xylan_socket:sockname(State#state.a_sock),
+	    {ok,{RemoteIP,RemotePort}} = xylan_socket:peername(State#state.a_sock),
 	    RouteInfo = [{dst_ip,inet:ntoa(LocalIP)},{dst_port,LocalPort},
 			 {src_ip,inet:ntoa(RemoteIP)},{src_port,RemotePort},
 			 {data,Data}],
 	    gen_server:cast(State#state.parent, {route,State#state.session_key,RouteInfo}),
 	    {noreply, State#state { initial = Data }};
        true ->
-	    exo_socket:send(State#state.b_sock, Data),
-	    exo_socket:setopts(State#state.a_sock, [{active,once}]),
+	    xylan_socket:send(State#state.b_sock, Data),
+	    xylan_socket:setopts(State#state.a_sock, [{active,once}]),
 	    {noreply, State}
     end;
 %% data from B side proxy
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_b,
-      Socket =:= (State#state.b_sock)#exo_socket.socket ->
-    exo_socket:send(State#state.a_sock, Data),
-    exo_socket:setopts(State#state.b_sock, [{active,once}]),
+      Socket =:= (State#state.b_sock)#xylan_socket.socket ->
+    xylan_socket:send(State#state.a_sock, Data),
+    xylan_socket:setopts(State#state.b_sock, [{active,once}]),
     {noreply, State};
 
 %% closed A side (user)
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_a_closed,
-      Socket =:= (State#state.a_sock)#exo_socket.socket ->
+      Socket =:= (State#state.a_sock)#xylan_socket.socket ->
     ?debug("got A closed", []),
     if State#state.b_closed;
        State#state.b_sock =:= undefined ->
 	    ?debug("both closed", []),
-	    %% exo_socket:close(State#state.user)
+	    %% xylan_socket:close(State#state.user)
 	    {stop, normal, State};
        true ->
-	    exo_socket:shutdown(State#state.b_sock, write),
-	    %% exo_socket:close(State#state.user)
+	    xylan_socket:shutdown(State#state.b_sock, write),
+	    %% xylan_socket:close(State#state.user)
 	    {noreply, State#state { a_closed = true }}
     end;
 
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_b_closed,
-      Socket =:= (State#state.b_sock)#exo_socket.socket ->
+      Socket =:= (State#state.b_sock)#xylan_socket.socket ->
     ?debug("got B closed", []),
     if State#state.a_closed;
        State#state.a_sock =:= undefined ->
 	    ?debug("both closed", []),
-	    %% exo_socket:close(State#state.b_sock)
+	    %% xylan_socket:close(State#state.b_sock)
 	    {stop, normal, State};
        true ->
-	    exo_socket:shutdown(State#state.a_sock, write),
-	    %% exo_socket:close(State#state.b_sock)
+	    xylan_socket:shutdown(State#state.a_sock, write),
+	    %% xylan_socket:close(State#state.b_sock)
 	    {noreply, State#state { b_closed = true }}
     end;
 
@@ -260,12 +261,12 @@ terminate(_Reason, State) ->
     ?debug("terminate ~p", [_Reason]),
     if State#state.a_sock =/= undefined ->
 	    ?debug("terminate close A side (user)"),
-	    exo_socket:close(State#state.a_sock);
+	    xylan_socket:close(State#state.a_sock);
        true -> ok
     end,
     if State#state.b_sock =/= undefined ->
 	    ?debug("terminate close B side (proxy)"),
-	    exo_socket:close(State#state.b_sock);
+	    xylan_socket:close(State#state.b_sock);
        true -> ok
     end.
 

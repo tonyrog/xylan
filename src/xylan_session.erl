@@ -35,6 +35,9 @@
 
 -type timer() :: reference().
 
+-include_lib("lager/include/log.hrl").
+-include_lib("xylan_socket.hrl").
+
 -record(state, {
 	  server_id  :: string(),
 	  client_id  :: string(),
@@ -47,11 +50,9 @@
 	  tag=tcp,tag_closed=tcp_closed,tag_error=tcp_error,
 	  parent :: pid(),
 	  mon    :: reference(),  %% parent monitor
-	  socket :: exo_socket:exo_socket()  %% client proxy socket
+	  socket :: xylan_socket:xylan_socket()  %% client proxy socket
 	 }).
 
--include_lib("lager/include/log.hrl").
--include_lib("exo/src/exo_socket.hrl").
 
 %%%===================================================================
 %%% API
@@ -119,8 +120,8 @@ handle_call(_Request, _From, State) ->
 %%--------------------------------------------------------------------
 handle_cast({set_socket, Socket}, State) ->
     close(State#state.socket),  %% close old socket
-    {T,C,E} = exo_socket:tags(Socket),
-    exo_socket:setopts(Socket, [{active,once}]),
+    {T,C,E} = xylan_socket:tags(Socket),
+    xylan_socket:setopts(Socket, [{active,once}]),
     Timeout = State#state.auth_timeout,
     TRef=erlang:start_timer(Timeout,self(),auth_timeout),
     {noreply, State#state { socket=Socket,auth_timer=TRef,tag=T,tag_closed=C,tag_error=E }};
@@ -165,7 +166,7 @@ handle_cast(_Msg, State) ->
 
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag,
-      Socket =:= (State#state.socket)#exo_socket.socket,
+      Socket =:= (State#state.socket)#xylan_socket.socket,
       State#state.client_auth =:= false ->
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_ack, [{id,_ClientID},{cred,Cred}]} ->
@@ -174,7 +175,7 @@ handle_info({Tag,Socket,Data}, State) when
 	    case crypto:sha([State#state.client_key,State#state.client_chal]) of
 		Cred ->
 		    ?debug("handle_info: credential success client:~p", [State#state.client_id]),
-		    exo_socket:setopts(State#state.socket, [{active,once}]),
+		    xylan_socket:setopts(State#state.socket, [{active,once}]),
 		    cancel_timer(State#state.auth_timer),
 		    {noreply, State#state { auth_timer = undefined, client_auth = true }};
 		_CredFail ->
@@ -196,8 +197,8 @@ handle_info({Tag,Socket,Data}, State) when
 
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag,
-      Socket =:= (State#state.socket)#exo_socket.socket ->
-    exo_socket:setopts(State#state.socket, [{active,once}]),
+      Socket =:= (State#state.socket)#xylan_socket.socket ->
+    xylan_socket:setopts(State#state.socket, [{active,once}]),
     try binary_to_term(Data, [safe]) of
 	ping when State#state.client_auth =:= true ->
 	    ?debug("got session ping", []),
@@ -215,7 +216,7 @@ handle_info({Tag,Socket,Data}, State) when
 
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
-      Socket =:= (State#state.socket)#exo_socket.socket ->
+      Socket =:= (State#state.socket)#xylan_socket.socket ->
     ?debug("client session closed", []),
     close(State#state.socket),
     cancel_timer(State#state.auth_timer),
@@ -223,7 +224,7 @@ handle_info({Tag,Socket}, State) when
 
 handle_info({Tag,Socket,Error}, State) when
       Tag =:= State#state.tag_error,
-      Socket =:= (State#state.socket)#exo_socket.socket ->
+      Socket =:= (State#state.socket)#xylan_socket.socket ->
     ?debug("client socket error ~p", [Error]),
     close(State#state.socket),
     cancel_timer(State#state.auth_timer),
@@ -276,11 +277,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 close(undefined) -> ok;
-close(Socket) -> exo_socket:close(Socket).
+close(Socket) -> xylan_socket:close(Socket).
 
 cancel_timer(Timer) when is_reference(Timer) -> 
     erlang:cancel_timer(Timer);
 cancel_timer(undefined) -> false.
 
 send(Socket, Term) ->
-    exo_socket:send(Socket, term_to_binary(Term)).
+    xylan_socket:send(Socket, term_to_binary(Term)).

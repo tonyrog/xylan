@@ -43,7 +43,7 @@
 -define(DEFAULT_DATA_TIMEOUT, 5000). %% timeout for proxy data connection
 
 -include_lib("lager/include/log.hrl").
--include_lib("exo/src/exo_socket.hrl").
+-include_lib("xylan_socket.hrl").
 
 
 -type interface() :: atom() | string().
@@ -78,17 +78,17 @@
 	{
 	  server_id :: string(),
 	  %% fixme: may need to be able to have multiple control sockets
-	  cntl_sock :: exo_socket:exo_socket(),  %% control chan listen socket
+	  cntl_sock :: xylan_socket(),  %% control chan listen socket
 	  cntl_port :: integer(),
 	  cntl_ref  :: term(), %% async accept reference
-	  data_sock :: exo_socket:exo_socket(),  %% data chan listen socket
+	  data_sock :: xylan_socket(),  %% data chan listen socket
 	  data_port :: integer(),
 	  data_ref  :: term(), %% async accept reference
-	  user_socks :: [{exo_socket:exo_socket(), term()}], %% listen sockets
+	  user_socks :: [{xylan_socket(), term()}], %% listen sockets
 	  user_ports :: user_ports(),
 	  clients = []  :: [#client{}],
-	  auth_list = [] :: [{exo_socket:exo_socket(),timer()}], %% client sesion
-	  data_list = [] :: [{exo_socket:exo_socket(),timer()}], %% client data proxy
+	  auth_list = [] :: [{xylan_socket(),timer()}], %% client sesion
+	  data_list = [] :: [{xylan_socket(),timer()}], %% client data proxy
 	  proxy_list = [] :: [{pid(),reference(),binary()}],     %% proxy sessions
 	  auth_timeout  = ?DEFAULT_AUTH_TIMEOUT :: timeout(),
 	  data_timeout  = ?DEFAULT_DATA_TIMEOUT :: timeout()
@@ -154,8 +154,8 @@ init(Options) ->
     {ok,CntlSock} = start_client_cntl(CntlPort),
     {ok,DataSock} = start_client_data(DataPort),
     UserSocks = start_user(UserPorts),
-    {ok,CntlRef} = exo_socket:async_accept(CntlSock),
-    {ok,DataRef} = exo_socket:async_accept(DataSock),
+    {ok,CntlRef} = xylan_socket:async_accept(CntlSock),
+    {ok,DataRef} = xylan_socket:async_accept(DataSock),
     AuthTimeout = proplists:get_value(auth_timeout,Options,?DEFAULT_AUTH_TIMEOUT),
     DataTimeout = proplists:get_value(data_timeout,Options,?DEFAULT_DATA_TIMEOUT),
     {ok, #state{ server_id = ServerID,
@@ -169,13 +169,13 @@ init(Options) ->
 
 
 start_client_cntl(Port) ->
-    exo_socket:listen(Port, [tcp], [{reuseaddr,true},
+    xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
 				    {nodelay, true},
 				    {mode,binary},
 				    {packet,4}]).
 
 start_client_data(Port) ->
-    exo_socket:listen(Port, [tcp], [{reuseaddr,true},
+    xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
 				    {nodelay, true},
 				    {mode,binary},
 				    {packet,4}]).
@@ -199,13 +199,13 @@ start_user(Port) ->
     start_user([Port]).
 
 open_user_port(Port,IP) when is_integer(Port) ->
-    case exo_socket:listen(Port, [tcp], [{reuseaddr,true},
+    case xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
 					 {nodelay, true},
 					 {mode,binary},
 					 {ifaddr,IP},
 					 {packet,0}]) of
 	{ok,Socket} ->
-	    {ok,Ref} = exo_socket:async_accept(Socket),
+	    {ok,Ref} = xylan_socket:async_accept(Socket),
 	    [{Socket,Ref}];
 	Error ->
 	    ?warning("Error listen to port ~w:~p ~p",[Port,IP,Error]),
@@ -276,13 +276,13 @@ handle_cast(_Msg, State) ->
 %% accept Incoming user socket
 handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
     if
-	Listen =:= (State#state.cntl_sock)#exo_socket.socket, Ref =:= State#state.cntl_ref ->
+	Listen =:= (State#state.cntl_sock)#xylan_socket.socket, Ref =:= State#state.cntl_ref ->
 	    ?debug("handle_info: (client control) ~p", [_Msg]),
-	    {ok,Ref1} = exo_socket:async_accept(State#state.cntl_sock),
+	    {ok,Ref1} = xylan_socket:async_accept(State#state.cntl_sock),
 	    AuthOpts = [],  %% [delay_auth]
-	    case exo_socket:async_socket(State#state.cntl_sock, Socket, AuthOpts) of
+	    case xylan_socket:async_socket(State#state.cntl_sock, Socket, AuthOpts) of
 		{ok, XSocket} ->
-		    exo_socket:setopts(XSocket, [{active,once}]),
+		    xylan_socket:setopts(XSocket, [{active,once}]),
 		    Timeout = State#state.auth_timeout,
 		    TRef=erlang:start_timer(Timeout,self(),auth_timeout),
 		    Ls = [{XSocket,TRef}|State#state.auth_list],
@@ -291,15 +291,15 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    ?error("inet_accept: ~p", [_Error]),
 		    {noreply, State#state { cntl_ref=Ref1}}
 	    end;
-	Listen =:= (State#state.data_sock)#exo_socket.socket, Ref =:= State#state.data_ref ->
+	Listen =:= (State#state.data_sock)#xylan_socket.socket, Ref =:= State#state.data_ref ->
 	    ?debug("handle_info: (client data) ~p", [_Msg]),
-	    {ok,Ref1} = exo_socket:async_accept(State#state.data_sock),
+	    {ok,Ref1} = xylan_socket:async_accept(State#state.data_sock),
 	    AuthOpts = [],  %% [delay_auth]
-	    case exo_socket:async_socket(State#state.data_sock, Socket, AuthOpts) of
+	    case xylan_socket:async_socket(State#state.data_sock, Socket, AuthOpts) of
 		{ok, XSocket} ->
 		    %% FIXME: add options that allow some ports to be SERVER INITIATE ports!!!
 		    %% wait for first packet should contain the correct SessionKey!
-		    exo_socket:setopts(XSocket, [{active,once}]),
+		    xylan_socket:setopts(XSocket, [{active,once}]),
 		    Timeout = State#state.data_timeout,
 		    TRef=erlang:start_timer(Timeout,self(),data_timeout),
 		    Ls = [{XSocket,TRef}|State#state.data_list],
@@ -315,23 +315,23 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    ?error("handle_info: listen socket not found"),
 		    {noreply, State};
 		{value,{UserSock,Ref},UserSocks} ->
-		    {ok,Ref1} = exo_socket:async_accept(UserSock),
+		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
 		    UsersSocks1 = [{UserSock,Ref1}|UserSocks],
 		    AuthOpts = [],  %% [delay_auth]
 		    SessionKey = crypto:rand_bytes(16),
-		    case exo_socket:async_socket(UserSock,Socket,AuthOpts) of
+		    case xylan_socket:async_socket(UserSock,Socket,AuthOpts) of
 			{ok, XSocket} ->
 			    case xylan_proxy:start(SessionKey) of
 				{ok, Pid} ->
 				    Mon = erlang:monitor(process, Pid),
-				    exo_socket:controlling_process(XSocket, Pid),
+				    xylan_socket:controlling_process(XSocket, Pid),
 				    gen_server:cast(Pid, {set_a,XSocket}),
 				    Ls = [{Pid,Mon,SessionKey}|State#state.proxy_list],
 				    {noreply, State#state { proxy_list = Ls,
 							    user_socks=UsersSocks1}};
 				_Error ->
 				    ?error("inet_accept: (user) ~p", [_Error]),
-				    exo_socket:close(XSocket),
+				    xylan_socket:close(XSocket),
 				    {noreply, State#state { user_socks=UsersSocks1}}
 			    end;
 			_Error ->
@@ -359,27 +359,27 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 			    case lists:keyfind(ID, #client.id, State#state.clients) of
 				false ->
 				    ?warning("client not found, ~p",[Message]),
-				    exo_socket:close(XSocket),
+				    xylan_socket:close(XSocket),
 				    {noreply, State#state { auth_list = AuthList }};
 				Client when is_pid(Client#client.pid) ->
 				    ?debug("client req=~p",[Message]),
-				    exo_socket:controlling_process(XSocket, Client#client.pid),
+				    xylan_socket:controlling_process(XSocket, Client#client.pid),
 				    gen_server:cast(Client#client.pid, {set_socket, XSocket}),
 				    gen_server:cast(Client#client.pid, Message),
 				    {noreply, State#state { auth_list = AuthList }};
 				_Client ->
 				    ?debug("client not connected, ~p",[Message]),
-				    exo_socket:close(XSocket),
+				    xylan_socket:close(XSocket),
 				    {noreply, State#state { auth_list = AuthList }}
 			    end;
 			Other ->
 			    ?warning("handle_info: bad client message=~p",[Other]),
-			    exo_socket:close(XSocket),
+			    xylan_socket:close(XSocket),
 			    {noreply, State#state { auth_list = AuthList }}
 		    catch
 			error:Reason ->
 			    ?warning("handle_info: bad client message=~p",[{error,Reason}]),
-			    exo_socket:close(XSocket),
+			    xylan_socket:close(XSocket),
 			    {noreply, State#state { auth_list = AuthList }}
 		    end
 	    end;
@@ -393,7 +393,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 	    	    {noreply, State};
 		{value,{Proxy,Mon,_Data},ProxyList} ->
 		    erlang:demonitor(Mon, [flush]),
-		    exo_socket:controlling_process(XSocket, Proxy),
+		    xylan_socket:controlling_process(XSocket, Proxy),
 		    gen_server:cast(Proxy, {set_b,XSocket}),
 		    {noreply, State#state { proxy_list = ProxyList,data_list=Ls }}
 	    end
@@ -418,7 +418,7 @@ handle_info({timeout,TRef,auth_timeout}, State) ->
 	    {noreply, State};
 	{value,{Socket,TRef},Ls} ->
 	    ?info("auth_timeout"),
-	    exo_socket:close(Socket),
+	    xylan_socket:close(Socket),
 	    {noreply, State#state { auth_list = Ls}}
     end;
 
@@ -429,7 +429,7 @@ handle_info({timeout,TRef,data_timeout}, State) ->
 	    {noreply, State};
 	{value,{Socket,TRef},Ls} ->
 	    ?info("data_timeout"),
-	    exo_socket:close(Socket),
+	    xylan_socket:close(Socket),
 	    {noreply, State#state { data_list = Ls}}
     end;
 
@@ -498,18 +498,18 @@ close_socket(Socket, State) ->
 		{value,{Socket,TRef},Ls} ->
 		    ?debug("close client socket"),
 		    cancel_timer(TRef),
-		    exo_socket:close(Socket),
+		    xylan_socket:close(Socket),
 		    State#state { auth_list = Ls }
 	    end;
 	{value,{Socket,TRef},Ls} ->
 	    ?debug("close data socket"),
 	    cancel_timer(TRef),
-	    exo_socket:close(Socket),
+	    xylan_socket:close(Socket),
 	    State#state { data_list = Ls }
     end.
 
 take_socket(Socket,Pos,SocketList) when is_integer(Pos), Pos >= 0 ->
-    take(fun (#exo_socket { socket=S }) -> S=:=Socket end, Pos, SocketList).
+    take(fun (#xylan_socket { socket=S }) -> S=:=Socket end, Pos, SocketList).
 
 take(Fun, Pos, List) when is_function(Fun), is_list(List) ->
     take_(Fun, Pos, List, []).

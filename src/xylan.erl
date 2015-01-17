@@ -30,5 +30,4 @@
 
 start() ->
     lager:start(),
-    application:start(exo),
     application:start(xylan).

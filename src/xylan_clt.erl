@@ -44,7 +44,7 @@
 -define(DEFAULT_AUTH_TIMEOUT, 3000).
 
 -include_lib("lager/include/log.hrl").
--include_lib("exo/src/exo_socket.hrl").
+-include_lib("xylan_socket.hrl").
 
 -type timer() :: reference().
 
@@ -54,7 +54,7 @@
 	  tag = tcp,
 	  tag_closed = tcp_closed,
 	  tag_error  = tcp_error,
-	  server_sock :: exo_socket:exo_socket(),  %% user listen socket
+	  server_sock :: xylan_socket(),  %% user listen socket
 	  server_ip   :: inet:ip_address(),
 	  server_port :: integer(),
 	  server_chal :: binary(),
@@ -176,8 +176,8 @@ handle_cast(_Msg, State) ->
 handle_info(_Info={Tag,Socket,Data}, State) when
       State#state.server_auth =:= false,
       Tag =:= State#state.tag,
-      Socket =:= (State#state.server_sock)#exo_socket.socket ->
-    exo_socket:setopts(State#state.server_sock, [{active, once}]),
+      Socket =:= (State#state.server_sock)#xylan_socket.socket ->
+    xylan_socket:setopts(State#state.server_sock, [{active, once}]),
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_res,[{id,ServerID},{chal,Chal},{cred,Cred}]} -> %% auth and cred from server
 	    ?debug("auth_res: ~p ok", [_Mesg]),
@@ -211,8 +211,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 handle_info(_Info={Tag,Socket,Data}, State) when
       State#state.server_auth =:= true,
       Tag =:= State#state.tag,
-      Socket =:= (State#state.server_sock)#exo_socket.socket ->
-    exo_socket:setopts(State#state.server_sock, [{active, once}]),
+      Socket =:= (State#state.server_sock)#xylan_socket.socket ->
+    xylan_socket:setopts(State#state.server_sock, [{active, once}]),
     try binary_to_term(Data, [safe]) of
 	pong when State#state.ping =:= undefined ->
 	    ?debug("handle_info: (control channel) pong"),
@@ -253,7 +253,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 %% client data socket closed before proxy connection is established
 handle_info(_Info={Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
-      Socket =:= (State#state.server_sock)#exo_socket.socket ->
+      Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     ?debug("handle_info: (control channel) ~p", [_Info]),
     close(State#state.server_sock),
     cancel_timer(State#state.auth),
@@ -266,7 +266,7 @@ handle_info(_Info={Tag,Socket}, State) when
 %% data socket got error before proxy established
 handle_info(_Info={Tag,Socket,_Error}, State) when 
       Tag =:= State#state.tag_error,
-      Socket =:= (State#state.server_sock)#exo_socket.socket ->
+      Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     ?debug("handle_info: (data channel) ~p", [_Info]),
     close(State#state.server_sock),
     cancel_timer(State#state.auth),
@@ -280,7 +280,7 @@ handle_info({timeout,T,reconnect}, State) when T =:= State#state.reconnect ->
     %% a bit ugly
     handle_info(reconnect, State#state { reconnect = undefined });
 handle_info(reconnect, State) when State#state.server_sock =:= undefined ->
-    case exo_socket:connect(State#state.server_ip,State#state.server_port,
+    case xylan_socket:connect(State#state.server_ip,State#state.server_port,
 			    [{mode,binary},{packet,4},{nodelay,true}],
 			    3000) of
 	{ok, Socket} ->
@@ -288,9 +288,9 @@ handle_info(reconnect, State) when State#state.server_sock =:= undefined ->
 		   [State#state.server_ip,State#state.server_port]),
 	    Chal = crypto:rand_bytes(16),
 	    send(Socket, {auth_req,[{id,State#state.id},{chal,Chal}]}),
-	    exo_socket:setopts(Socket, [{active, once}]),
+	    xylan_socket:setopts(Socket, [{active, once}]),
 	    TRef = erlang:start_timer(State#state.auth_timeout, self(), auth_timeout),
-	    {T,C,E} = exo_socket:tags(Socket),
+	    {T,C,E} = xylan_socket:tags(Socket),
 	    {noreply, State#state { server_sock = Socket,
 				    server_chal = Chal,
 				    server_auth = false,
@@ -365,7 +365,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 close(undefined) -> ok;
-close(Socket) -> exo_socket:close(Socket).
+close(Socket) -> xylan_socket:close(Socket).
 
 cancel_timer(undefined) -> false;
 cancel_timer(Timer) -> erlang:cancel_timer(Timer).
@@ -374,7 +374,7 @@ reconnect_after(Timeout) ->
     erlang:start_timer(Timeout, self(),reconnect).
 
 send(Socket, Term) ->
-    exo_socket:send(Socket, term_to_binary(Term)).
+    xylan_socket:send(Socket, term_to_binary(Term)).
 
 route([{R,L}|Rs], RouteInfo) ->
     case match(R, RouteInfo) of
