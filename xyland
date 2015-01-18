@@ -25,7 +25,7 @@
 ##  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ##  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# set -x
+set -x
 
 ##### LEGEND #########
 # ## MUST
@@ -55,6 +55,7 @@ user=$USER
 config=xylan.config
 appname=xylan
 erlpath=""
+patha="$HOME/erlang/lager;$HOME/erlang/xylan"
 
 [ -z "${echo}" ] && echo=echo
 
@@ -162,11 +163,6 @@ $(${echo} ${node} | grep "@" >/dev/null 2>&1) || errexit "set full node name!"
 
 [ -z "$logbase" ] && logbase="/var/log/${appname}"
 
-applog="${logbase}/${appname}.log"
-appsasllog="${logbase}/${appname}-sasl.log"
-
-# loggingopt="-sasl errlog_type error -kernel error_logger '{file,\"${applog}\"}' -sasl sasl_error_logger '{file,\"${appsasllog}\"}'"
-
 if [ "${realuser}" != "${user}" ]; then
     if [ "$(uname)" = "Darwin" ]; then  
         runcmd="${su} ${user} -c" # IF runcmd == su - $user THEN erlang app crach with {error, nxndomain} 
@@ -189,9 +185,6 @@ start() {
         errexit "node '${node}'already running!"
     fi
 
-    [ -f "${applog}" ] && mv ${applog} ${applog}.1
-    [ -f "${appsasllog}" ] && mv ${appsasllog} ${appsasllog}.1
-
     local argfile="${tmpargsdir}/${node}"
 
     rm -f ${argfile}
@@ -200,7 +193,6 @@ start() {
 
     cat > ${argfile} << _EOF
 ${heartopt}
--boot start_sasl
 ${nameopt} ${node}
 ${erlpath}
 ${startopt}
@@ -233,10 +225,7 @@ console() {
         errexit "node '${node}'already running!"
     fi
 
-    [ -f "${applog}" ] && mv ${applog} ${applog}.1
-    [ -f "${appsasllog}" ] && mv ${appsasllog} ${appsasllog}.1
-
-    ${runcmd} "${erl} -boot start_sasl ${nameopt} ${node} ${erlpath} ${consoleopt} ${cookieopt} ${configopt} ${loggingopt} -s ${appname} ${extraargs}"
+    ${runcmd} "${erl} ${nameopt} ${node} ${erlpath} ${consoleopt} ${cookieopt} ${configopt} ${loggingopt} -s ${appname} ${extraargs}"
 }
 
 $action
