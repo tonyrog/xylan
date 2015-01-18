@@ -44,7 +44,7 @@
 # -H use erlang heart
 #### INTERNAL #####
 
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH
+PATH=/usr/local/bin:/bin:/sbin:/usr/bin:/usr/sbin:$PATH
 
 erl=$(which erl)
 su=$(which su)
