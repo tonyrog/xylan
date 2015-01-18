@@ -283,7 +283,7 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	    case xylan_socket:async_socket(State#state.cntl_sock, Socket, AuthOpts) of
 		{ok, XSocket} ->
 		    {ok,{SrcIP,SrcPort}} = xylan_socket:peername(XSocket),
-		    ?info("client connected from ~p:~p\n", [SrcIP,SrcPort]),
+		    ?info("client connected from ~p:~p\n", [inet:ntoa(SrcIP),SrcPort]),
 		    xylan_socket:setopts(XSocket, [{active,once}]),
 		    Timeout = State#state.auth_timeout,
 		    TRef=erlang:start_timer(Timeout,self(),auth_timeout),
