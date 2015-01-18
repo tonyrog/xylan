@@ -143,6 +143,7 @@ handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
     %% crypto:sha is used instead of crypto:hash R15!!
     Cred = crypto:sha([State#state.server_key,Chal]), %% server cred
     send(State#state.socket, {auth_res,[{id,State#state.server_id},{chal,Chal1},{cred,Cred}]}),
+    ?info("client ~p reply and challenge sent", [State#state.client_id]),
     {noreply, State#state { client_chal = Chal1 }};
 handle_cast(Route={route,_DataPort,_SessionKey,_RouteInfo}, State) when
       State#state.client_auth =:= true ->
@@ -174,23 +175,23 @@ handle_info({Tag,Socket,Data}, State) when
 	    %% crypto:sha is used instead of crypto:hash R15!!
 	    case crypto:sha([State#state.client_key,State#state.client_chal]) of
 		Cred ->
-		    ?debug("handle_info: credential success client:~p", [State#state.client_id]),
+		    ?info("client ~p credential accepted", [State#state.client_id]),
 		    xylan_socket:setopts(State#state.socket, [{active,once}]),
 		    cancel_timer(State#state.auth_timer),
 		    {noreply, State#state { auth_timer = undefined, client_auth = true }};
 		_CredFail ->
-		    ?debug("handle_info: credential failed"),
+		    ?info("client ~p credential failed", [State#state.client_id]),
 		    close(State#state.socket),
 		    {noreply, State#state { socket = undefined,
 					    client_auth = false}}
 	    end;
 	_Mesg ->
 	    close(State#state.socket),
-	    ?warning("unknown message: ~p", [_Mesg]),
+	    ?info("client ~p authentication failed (bad message)", [State#state.client_id]),
 	    {noreply, State#state { socket = undefined, client_auth = false}}
     catch
 	error:Reason ->
-	    ?error("bad session data ~p", [{error,Reason}]),
+	    ?error("client ~p authentication,bad data ~p", [{error,Reason}]),
 	    close(State#state.socket),
 	    {noreply, State#state { socket = undefined, client_auth = false}}
     end;
@@ -217,7 +218,7 @@ handle_info({Tag,Socket,Data}, State) when
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.socket)#xylan_socket.socket ->
-    ?debug("client session closed", []),
+    ?info("client ~p close", [State#state.client_id]),
     close(State#state.socket),
     cancel_timer(State#state.auth_timer),
     {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
@@ -225,14 +226,14 @@ handle_info({Tag,Socket}, State) when
 handle_info({Tag,Socket,Error}, State) when
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.socket)#xylan_socket.socket ->
-    ?debug("client socket error ~p", [Error]),
+    ?info("client ~p error ~p", [State#state.client_id, Error]),
     close(State#state.socket),
     cancel_timer(State#state.auth_timer),
     {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
 
 handle_info({timeout,TRef,auth_timeout}, State) when 
       TRef =:= State#state.auth_timer ->
-    ?debug("authentication timeout"),
+    ?info("client ~p autentication timeout", [State#state.client_id]),
     close(State#state.socket),
     {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
 

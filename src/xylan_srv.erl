@@ -282,6 +282,8 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	    AuthOpts = [],  %% [delay_auth]
 	    case xylan_socket:async_socket(State#state.cntl_sock, Socket, AuthOpts) of
 		{ok, XSocket} ->
+		    {ok,{SrcIP,SrcPort}} = xylan_socket:peername(XSocket),
+		    ?info("client connected from ~p:~p\n", [SrcIP,SrcPort]),
 		    xylan_socket:setopts(XSocket, [{active,once}]),
 		    Timeout = State#state.auth_timeout,
 		    TRef=erlang:start_timer(Timeout,self(),auth_timeout),
@@ -358,17 +360,17 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 			Message = {auth_req,[{id,ID},{chal,_Chal}]} ->
 			    case lists:keyfind(ID, #client.id, State#state.clients) of
 				false ->
-				    ?warning("client not found, ~p",[Message]),
+				    ?warning("client ~p not found",[ID]),
 				    xylan_socket:close(XSocket),
 				    {noreply, State#state { auth_list = AuthList }};
 				Client when is_pid(Client#client.pid) ->
-				    ?debug("client req=~p",[Message]),
+				    ?info("client ~p connected\n", [ID]),
 				    xylan_socket:controlling_process(XSocket, Client#client.pid),
 				    gen_server:cast(Client#client.pid, {set_socket, XSocket}),
 				    gen_server:cast(Client#client.pid, Message),
 				    {noreply, State#state { auth_list = AuthList }};
 				_Client ->
-				    ?debug("client not connected, ~p",[Message]),
+				    ?warning("client pid not present", [ID]),
 				    xylan_socket:close(XSocket),
 				    {noreply, State#state { auth_list = AuthList }}
 			    end;
