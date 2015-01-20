@@ -54,8 +54,7 @@ node=xylan@localhost
 user=$USER
 config=xylan.config
 appname=xylan
-erlpath=""
-patha="$HOME/erlang/lager;$HOME/erlang/xylan"
+erlpath="-pa $HOME/erlang/lager -pa $HOME/erlang/xylan"
 
 [ -z "${echo}" ] && echo=echo
 
@@ -119,7 +118,7 @@ do
         c) cookie="$OPTARG";;
         N) nameopt="-name";;
         A) appname="$OPTARG";;
-        P) patha="$OPTARG";;
+        P) pathb="$OPTARG";;
         o) erlopt="$OPTARG";;
         s) extrastart="$OPTARG";;
         u) user="$OPTARG";;
@@ -148,8 +147,8 @@ fi
 
 if [ "$action" = start -o "$action" = console ]; then 
     [ -z "$appname" ] && errexit "appname not set!"
-    if [ ! -z "$patha" ]; then
-	erlpath=$(delim " -pa " "${patha}")
+    if [ ! -z "$pathb" ]; then
+	erlpath=$erlpath $(delim " -pa " "${pathb}")
     fi
 fi
 
