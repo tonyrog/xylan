@@ -23,7 +23,7 @@
 %%% Created : Jan 2015 by Malotte W Lonne
 %%% @end
 %%%-------------------------------------------------------------------
--module(xylan_ssh_menu).
+-module(xylan_ssh).
 -behaviour(ssh_daemon_channel).
 
 -include_lib("lager/include/log.hrl").
