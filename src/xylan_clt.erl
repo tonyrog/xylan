@@ -44,7 +44,7 @@
 -define(DEFAULT_AUTH_TIMEOUT, 3000).
 
 -include_lib("lager/include/log.hrl").
--include_lib("xylan_socket.hrl").
+-include("xylan_socket.hrl").
 
 -type timer() :: reference().
 

@@ -43,7 +43,7 @@
 -define(DEFAULT_DATA_TIMEOUT, 5000). %% timeout for proxy data connection
 
 -include_lib("lager/include/log.hrl").
--include_lib("xylan_socket.hrl").
+-include("xylan_socket.hrl").
 
 
 -type interface() :: atom() | string().

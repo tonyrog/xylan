@@ -36,7 +36,7 @@
 -type timer() :: reference().
 
 -include_lib("lager/include/log.hrl").
--include_lib("xylan_socket.hrl").
+-include("xylan_socket.hrl").
 
 -record(state, {
 	  server_id  :: string(),

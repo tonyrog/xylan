@@ -16,7 +16,7 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Malotte Westma Lonne <malotte@malotte.net>
-%%% @copyright (C) 2014, Tony Rogvall
+%%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
 %%%    Proxy wedding ssh with host menu.
 %%%
@@ -35,6 +35,8 @@ menu() ->
     Config = example(),
     %% Validate start spec
     hex:validate_flags(Config, Spec),
+    Db = load(Config, []),
+    lager:debug("menu: db ~p", Db),
     Output = fun(Key) ->
 		     io:format("~p~n",[Key])
 	     end,
@@ -42,69 +44,97 @@ menu() ->
 		    io:get_line(">")
 	    end,
 
-    menu_loop(Spec, Config, Output, Input).
+    menu_loop(Spec, Db, Output, Input).
 
-menu_loop(Spec, Config, Output, Input) ->
-    case menu(Spec, Spec, Config, Output, Input) of
-	repeat -> menu_loop(Spec, Config, Output, Input);
-	{continue, NewSpec} -> menu_loop(NewSpec, Config, Output, Input);
-	{continue, NewSpec, NewConfig} -> menu_loop(NewSpec, NewConfig, Output, Input);
-	exit -> ok
+menu_loop(Spec, Db, Output, Input) ->
+    case menu(Spec, Spec, Db, Output, Input) of
+	repeat -> 
+	    menu_loop(Spec, Db, Output, Input);
+	{continue, NewSpec} -> 
+	    menu_loop(push(NewSpec, Spec), Db, Output, Input);
+	{continue, NewSpec, NewDb} -> 
+	    menu_loop(push(NewSpec, Spec), NewDb, Output, Input);
+	back -> 
+	    menu_loop(pop(Spec), Db, Output, Input);
+	exit -> 
+	    ok
     end.
 
+push(New, Old) ->
+    [New, Old].
+
+pop([Last | Prev]) ->
+    Prev.
 
 
-menu([], Spec, Config, Output, Input) ->
+menu([], Spec, Db, Output, Input) ->
     Choice = Input(),
     case Choice of
+	"..\n" -> back;
+	".\n" -> repeat;
 	"?\n" -> repeat;
 	"exit\n" -> exit;
-	_ -> scan_input(Choice, Spec, Config)
+	_ -> scan_input(Choice, Spec, Db)
     end;
-menu([{key, Key, TS} | List], Spec, Config, Output, Input) ->
+menu([{key, Key, TS} | List], Spec, Db, Output, Input) ->
     lager:debug("menu: key ~p ignored.",[Key]),
-    menu(List, Spec, Config, Output, Input);
-menu([{Type, Key, TS} | List], Spec, Config, Output, Input) ->
+    menu(List, Spec, Db, Output, Input);
+menu([{Type, Key, TS} | List], Spec, Db, Output, Input) ->
     Output(Key),
-    menu(List, Spec, Config, Output, Input).
+    menu(List, Spec, Db, Output, Input).
 
 
-scan_input(Choice, Spec, Config) ->
+scan_input(Choice, Spec, Db) ->
     case string:tokens(Choice, [$ , $\n]) of
-	[Key, Value] -> search_spec(list_to_atom(Key), Value, Spec, Config);
-	[Key] -> search_spec(list_to_atom(Key), "", Spec, Config);
+	[Key, Value] -> search_spec(list_to_atom(Key), Value, Spec, Db);
+	[Key] -> search_spec(list_to_atom(Key), "", Spec, Db);
 	_ -> repeat
     end.
 
-search_spec(Key, Value, Spec, Config) ->
-    lager:debug("search_spec: ~p = ~p, ~p, ~p", [Key, Value, Spec, Config]),
+search_spec(Key, Value, Spec, Db) ->
+    lager:debug("search_spec: ~p = ~p, ~p, ~p", [Key, Value, Spec, Db]),
     case lists:keyfind(Key, 2, Spec) of
-	{leaf, Key, TS} -> verify_ts(Key, Value, TS, Spec, Config);
+	{leaf, Key, TS} -> verify_ts(Key, Value, TS, Spec, Db);
+	{key, Key, []} = KeyPost -> search_spec(Key, Value, lists:delete(KeyPost, Spec), Db);
 	{_, Key, NewSpec} -> {continue, NewSpec} %% Pushed on old spec ??
     end.
 
-verify_ts(Key, Value, [{type, enumeration, Enums}], Spec, Config) ->
+verify_ts(Key, Value, [{type, enumeration, Enums}], Spec, Db) ->
     case lists:keymember(list_to_atom(Value), 2, Enums) of
-	true -> change_config(Key, list_to_atom(Value), Spec, Config);
+	true -> change_config(Key, list_to_atom(Value), Spec, Db);
 	false ->repeat
     end;
-verify_ts(Key, Value, [{type, string, _}], Spec, Config) when is_list(Value) ->
-    change_config(Key, Value, Spec, Config);
-verify_ts(Key, Value, [{type, string, _}], Spec, Config) ->
+verify_ts(Key, Value, [{type, string, _}], Spec, Db) when is_list(Value) ->
+    change_config(Key, Value, Spec, Db);
+verify_ts(Key, Value, [{type, string, _}], Spec, Db) ->
     repeat;
-verify_ts(Key, Value, [{type, uint32, _}], Spec, Config) ->
+verify_ts(Key, Value, [{type, UInt, _}], Spec, Db) when UInt =:= uint32;
+							UInt =:= uint64 ->
     try list_to_integer(Value) of
-	Int -> change_config(Key, Int, Spec, Config)
+	Int -> change_config(Key, Int, Spec, Db)
     catch
 	error:_E -> repeat
     end.
 	    
-change_config(Key, Value, Spec, Config) ->
+change_config(Key, Value, Spec, Db) ->
     lager:debug("change_config: ~p = ~p", [Key,Value]),
-    {continue, Spec, Config}. %% Pushed on old config ??
+    {continue, Spec, Db}. 
 			       
 	    
-	    
+load([], Db) ->
+    Db;
+load([{Key, [Value]} | Rest], Db) when is_tuple(Value) -> 
+    load(Rest, load_list(Key, 1, Value, []) ++ Db);
+load([{Key, Value} | Rest], Db) when is_tuple(Value) ->	    
+    load(Rest, Db);
+load([{Key, Value} | Rest], Db) ->
+    load(Rest, [{Key, Value} |Db]).
+
+load_list(Key, N, [], Acc) ->
+    Acc;
+load_list(Key, N, [{Key, Value} | Rest], Acc) ->
+    load_list(Key, N+1, Rest, [{[Key, N, Key], Value} | Acc]).
+
 
 spec() ->
     [
@@ -120,10 +150,6 @@ spec() ->
 	 {'case', 'interface-and-number',
 	  [{container, 'interface-and-number', 
 	    [{leaf, interface, [{type, string, []}]},
-	     {leaf, number, [{type, uint32, []}]}]}]},
-	 {'case', 'ip-and-number',
-	  [{container, 'ip-and-number',
-	    [{leaf, ip, [{type, 'yang:ip-address', []}]},
 	     {leaf, number, [{type, uint32, []}]}]}]}]}]},
      {leaf, client_port, [{type, uint32, []}]},
      {leaf, data_port, [{type, uint32, []}]},
