@@ -34,7 +34,7 @@
 	 terminate/2, code_change/3]).
 
 -include_lib("lager/include/log.hrl").
--include_lib("xylan_socket.hrl").
+-include("xylan_socket.hrl").
 
 -record(state, {
 	  session_key = <<>> :: binary(),
