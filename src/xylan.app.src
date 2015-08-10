@@ -1,6 +1,6 @@
 {application, xylan,
  [
-  {description, ""},
+  {description, "Double proxy call home service, aka proxy wedding"},
   {vsn, git},
   {registered, []},
   {applications, [
