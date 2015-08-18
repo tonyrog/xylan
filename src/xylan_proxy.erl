@@ -36,6 +36,8 @@
 -include_lib("lager/include/log.hrl").
 -include("xylan_socket.hrl").
 
+-define(B_CONNECT_TMO, 30000).
+
 -record(state, {
 	  session_key = <<>> :: binary(),
 	  tag_a=tcp, tag_a_closed=tcp_closed, tag_a_error=tcp_error,
@@ -45,7 +47,8 @@
 	  a_sock :: xylan_socket(),  %% user socket
 	  a_closed = false :: boolean(),
 	  b_sock :: xylan_socket(),  %% client socket (when connected)
-	  b_closed = false :: boolean()
+	  b_closed = false :: boolean(),
+	  b_timer :: reference()     %% while wait for b side to connect
 	 }).
 
 
@@ -126,12 +129,20 @@ handle_cast({set_b,Socket}, State) ->
     ?debug("handle_cast: set_b, send ~p",[State#state.initial]),
     {T,C,E} = xylan_socket:tags(Socket),
     xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
-    %% reactiveate the a side
-    xylan_socket:setopts(State#state.a_sock, [{active,once}]),
-    %% this will kick the activity
-    xylan_socket:send(Socket, State#state.initial),
+    if State#state.initial =:= undefined ->
+	    %% allow b side to be connected without require the initial
+	    %% packet. This is/should be configured.
+	    ok;
+       true ->
+	    %% reactiveate the a side
+	    xylan_socket:setopts(State#state.a_sock, [{active,once}]),
+	    %% this will kick the activity
+	    xylan_socket:send(Socket, State#state.initial)
+    end,
+    cancel_timer(State#state.b_timer),
     {noreply, State#state { b_sock = Socket,
 			    b_closed = false,
+			    b_timer = undefined,
 			    tag_b=T, tag_b_closed=C, tag_b_error=E}};
 
 handle_cast({connect,LIP,LPort,RIP,RPort}, State) ->
@@ -195,7 +206,8 @@ handle_info({Tag,Socket,Data}, State) when
 			 {src_ip,inet:ntoa(RemoteIP)},{src_port,RemotePort},
 			 {data,Data}],
 	    gen_server:cast(State#state.parent, {route,State#state.session_key,RouteInfo}),
-	    {noreply, State#state { initial = Data }};
+	    Btimer = erlang:start_timer(?B_CONNECT_TMO, self(), b_timer),
+	    {noreply, State#state { initial = Data, b_timer = Btimer }};
        true ->
 	    xylan_socket:send(State#state.b_sock, Data),
 	    xylan_socket:setopts(State#state.a_sock, [{active,once}]),
@@ -240,8 +252,11 @@ handle_info({Tag,Socket}, State) when
 	    {noreply, State#state { b_closed = true }}
     end;
 
-%% FIXME: add error cases
-
+handle_info({timeout,Btimer,b_timer}, State) when 
+      State#state.b_timer =:= Btimer,
+      State#state.b_sock =:= undefined ->
+    ?warning("B side never connected timeout:~p", [?B_CONNECT_TMO]),
+    {stop, normal, State};
 handle_info(_Info, State) ->
     ?warning("handle_info: got ~p\n", [_Info]),
     {noreply, State}.
@@ -284,3 +299,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+cancel_timer(Timer) when is_reference(Timer) -> 
+    erlang:cancel_timer(Timer);
+cancel_timer(undefined) -> false.
+
+
