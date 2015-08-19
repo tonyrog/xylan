@@ -27,13 +27,19 @@
 -behaviour(ssh_daemon_channel).
 
 -include_lib("lager/include/log.hrl").
--include_lib("ssh/include/ssh.hrl").
 
 %% ssh_channel callbacks
 -export([init/1, 
 	 handle_ssh_msg/2, 
 	 handle_msg/2, 
 	 terminate/2]).
+
+-record(pty, {term = "",
+	      width = 80,
+	      height = 25,
+	      pixel_width = 1024,
+	      pixel_height = 768,
+	      modes = <<>>}).
 
 %% loopdata
 -record(loopdata, {
@@ -44,7 +50,7 @@
 	  us_conref,      %% User side
 	  cs_channel,     %% Client side
 	  cs_conref,      %% Cient side
-	  pty,
+	  pty :: #pty{},  %% pty parameters
 	  buf = []
 	 }).
 
@@ -72,12 +78,12 @@ handle_ssh_msg({ssh_cm, ConRef,
 		 {TermName, Width, Height, PixWidth, PixHeight, Opts}}} = _Msg, 
 	       #loopdata{host = undefined} = LD0) ->
     ?debug("handle_ssh_msg: ~p", [_Msg]),
-    LD = LD0#loopdata{pty = #ssh_pty{term = TermName,
-				     width =  Width,
-				     height = Height,
-				     pixel_width = PixWidth,
-				     pixel_height = PixHeight,
-				     modes = Opts}},
+    LD = LD0#loopdata{pty = #pty{term = TermName,
+				 width =  Width,
+				 height = Height,
+				 pixel_width = PixWidth,
+				 pixel_height = PixHeight,
+				 modes = Opts}},
     ssh_connection:reply_request(ConRef, WantReply, success, Channel),
     {ok, LD};
 
@@ -86,12 +92,12 @@ handle_ssh_msg({ssh_cm, ConRef,
 		 {TermName, Width, Height, PixWidth, PixHeight, Opts}}} = _Msg, 
 	       LD0) ->
     ?debug("handle_ssh_msg: ~p", [_Msg]),
-    LD = LD0#loopdata{pty = #ssh_pty{term = TermName,
-				     width =  Width,
-				     height = Height,
-				     pixel_width = PixWidth,
-				     pixel_height = PixHeight,
-				     modes = Opts}},
+    LD = LD0#loopdata{pty = #pty{term = TermName,
+				 width =  Width,
+				 height = Height,
+				 pixel_width = PixWidth,
+				 pixel_height = PixHeight,
+				 modes = Opts}},
     ssh_connection:reply_request(ConRef, WantReply, success, Channel),
     %% Send on to client side ??
     {ok, LD};
@@ -165,13 +171,13 @@ handle_ssh_msg({ssh_cm, USConRef,
 		{window_change, 
 		 USChannel, Width, Height, PixWidth, PixHeight}} = _Msg, 
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
-			 cs_conref = CSConRef, cs_channel = CSChannel} = LD0) ->
+			 cs_conref = _CSConRef, cs_channel = _CSChannel} = LD0) ->
     ?debug("handle_ssh_msg: window_change from user side ~p", [_Msg]),
     %% Send on to client side ??
-    LD = LD0#loopdata{pty = #ssh_pty{width =  Width,
-				     height = Height,
-				     pixel_width = PixWidth,
-				     pixel_height = PixHeight}},
+    LD = LD0#loopdata{pty = #pty{width =  Width,
+				 height = Height,
+				 pixel_width = PixWidth,
+				 pixel_height = PixHeight}},
     {ok, LD};
 
 handle_ssh_msg({ssh_cm, _ConRef, {eof, _Channel}}, LD) ->
@@ -192,7 +198,7 @@ handle_ssh_msg({ssh_cm, _ConRef, {closed, Channel}},
 handle_ssh_msg({ssh_cm, CSConRef, {closed, CSChannel}},
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel,
-			 clients = Clients} = LD) ->
+			 clients = _Clients} = LD) ->
     ?debug("handle_ssh_msg: client side closed", []),
     %%ssh_connection:send_eof(USConRef, USChannel),
     ?debug("pid: ~p", [self()]),
@@ -351,12 +357,12 @@ connect(Host,
 
     ok = ssh_connection:shell(CSConRef, CSChannel),
     success = ssh_connection:ptty_alloc(CSConRef, CSChannel, 
-					[{term, Pty#ssh_pty.term},
-					 {width, Pty#ssh_pty.width},
-					 {height, Pty#ssh_pty.height},
-					 {pixel_width, Pty#ssh_pty.pixel_width},
-					 {pixel_height, Pty#ssh_pty.pixel_height},
-					 {pty_opts, Pty#ssh_pty.modes}], 
+					[{term, Pty#pty.term},
+					 {width, Pty#pty.width},
+					 {height, Pty#pty.height},
+					 {pixel_width, Pty#pty.pixel_width},
+					 {pixel_height, Pty#pty.pixel_height},
+					 {pty_opts, Pty#pty.modes}], 
 					infinity),
     {CSConRef, CSChannel}.
 

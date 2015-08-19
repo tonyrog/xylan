@@ -26,7 +26,6 @@
 -module(xylan_menu).
 
 -include_lib("lager/include/log.hrl").
--include_lib("ssh/include/ssh.hrl").
 
 -export([spec/0, example/0, menu/0]).
 
@@ -63,11 +62,11 @@ menu_loop(Spec, Db, Output, Input) ->
 push(New, Old) ->
     [New, Old].
 
-pop([Last | Prev]) ->
+pop([_Last | Prev]) ->
     Prev.
 
 
-menu([], Spec, Db, Output, Input) ->
+menu([], Spec, Db, _Output, Input) ->
     Choice = Input(),
     case Choice of
 	"..\n" -> back;
@@ -76,10 +75,10 @@ menu([], Spec, Db, Output, Input) ->
 	"exit\n" -> exit;
 	_ -> scan_input(Choice, Spec, Db)
     end;
-menu([{key, Key, TS} | List], Spec, Db, Output, Input) ->
+menu([{key, Key, _TS} | List], Spec, Db, Output, Input) ->
     lager:debug("menu: key ~p ignored.",[Key]),
     menu(List, Spec, Db, Output, Input);
-menu([{Type, Key, TS} | List], Spec, Db, Output, Input) ->
+menu([{_Type, Key, _TS} | List], Spec, Db, Output, Input) ->
     Output(Key),
     menu(List, Spec, Db, Output, Input).
 
@@ -106,7 +105,7 @@ verify_ts(Key, Value, [{type, enumeration, Enums}], Spec, Db) ->
     end;
 verify_ts(Key, Value, [{type, string, _}], Spec, Db) when is_list(Value) ->
     change_config(Key, Value, Spec, Db);
-verify_ts(Key, Value, [{type, string, _}], Spec, Db) ->
+verify_ts(_Key, _Value, [{type, string, _}], _Spec, _Db) ->
     repeat;
 verify_ts(Key, Value, [{type, UInt, _}], Spec, Db) when UInt =:= uint32;
 							UInt =:= uint64 ->
@@ -125,12 +124,12 @@ load([], Db) ->
     Db;
 load([{Key, [Value]} | Rest], Db) when is_tuple(Value) -> 
     load(Rest, load_list(Key, 1, Value, []) ++ Db);
-load([{Key, Value} | Rest], Db) when is_tuple(Value) ->	    
+load([{_Key, Value} | Rest], Db) when is_tuple(Value) ->	    
     load(Rest, Db);
 load([{Key, Value} | Rest], Db) ->
     load(Rest, [{Key, Value} |Db]).
 
-load_list(Key, N, [], Acc) ->
+load_list(_Key, _N, [], Acc) ->
     Acc;
 load_list(Key, N, [{Key, Value} | Rest], Acc) ->
     load_list(Key, N+1, Rest, [{[Key, N, Key], Value} | Acc]).
