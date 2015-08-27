@@ -111,11 +111,11 @@ init([Parent]) ->
 handle_call(get_status, _From, State) ->
     Status =
 	if State#state.socket =/= undefined,
-	   not State#state.client_auth ->
+	   State#state.client_auth =:= false ->
 		AuthTimeRemain = erlang:read_timer(State#state.auth_timer),
 		[{status,auth},{auth_time_remain,AuthTimeRemain}];
 	   State#state.socket =/= undefined,
-	   State#state.client_auth ->
+	   State#state.client_auth =:= true ->
 		LastPing = time_since_ms(os:timestamp(),
 					 State#state.ping_time),
 		SessionTime = time_since_ms(os:timestamp(),
@@ -144,15 +144,14 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({set_socket, Socket}, State) ->
-    close(State#state.socket),  %% close old socket
+    State1 = close_client(State),  %% close old socket
     {T,C,E} = xylan_socket:tags(Socket),
     xylan_socket:setopts(Socket, [{active,once}]),
-    AuthTimeout = State#state.auth_timeout,
-    AuthTimer = start_timer(AuthTimeout,auth_timeout),
-    {noreply, State#state { socket=Socket,
-			    auth_timer=AuthTimer,
-			    session_time = os:timestamp(),
-			    tag=T,tag_closed=C,tag_error=E }};
+    Timer = start_timer(State1#state.auth_timeout,auth_timeout),
+    {noreply, State1#state { socket=Socket,
+			     auth_timer=Timer,
+			     session_time = os:timestamp(),
+			     tag=T,tag_closed=C,tag_error=E }};
 handle_cast({set_config,Conf}, State) ->
     State1 =
 	lists:foldl(
@@ -218,20 +217,18 @@ handle_info({Tag,Socket,Data}, State) when
 					    ping_timer = PingTimer,
 					    client_auth = true }};
 		_CredFail ->
-		    ?info("client ~p credential failed", [State#state.client_id]),
-		    close(State#state.socket),
-		    {noreply, State#state { socket = undefined,
-					    client_auth = false}}
+		    ?info("client ~p credential failed", 
+			  [State#state.client_id]),
+		    {noreply, close_client(State)}
 	    end;
 	_Mesg ->
-	    close(State#state.socket),
-	    ?info("client ~p authentication failed (bad message)", [State#state.client_id]),
-	    {noreply, State#state { socket = undefined, client_auth = false}}
+	    ?info("client ~p authentication failed (bad message)", 
+		  [State#state.client_id]),
+	    {noreply, close_client(State)}
     catch
 	error:Reason ->
 	    ?error("client ~p authentication,bad data ~p", [{error,Reason}]),
-	    close(State#state.socket),
-	    {noreply, State#state { socket = undefined, client_auth = false}}
+	    {noreply, close_client(State)}
     end;
 
 handle_info({Tag,Socket,Data}, State) when 
@@ -244,17 +241,16 @@ handle_info({Tag,Socket,Data}, State) when
 	    %% client ping, just reply with pong
 	    send(State#state.socket, pong),
 	    cancel_timer(State#state.ping_timer),
-	    PingTimer = start_timer(State#state.ping_timeout,ping_timeout),
+	    Timer = start_timer(State#state.ping_timeout,ping_timeout),
 	    {noreply, State#state { ping_time = os:timestamp(),
-				    ping_timer = PingTimer }};
+				    ping_timer = Timer }};
 	Message ->
 	    ?warning("got session message: ~p", [Message]),
 	    {noreply, State}
     catch
 	error:Reason ->
 	    ?error("bad session data ~p", [{error,Reason}]),
-	    close(State#state.socket),
-	    {noreply, State#state { socket = undefined, client_auth = false}}
+	    {noreply, close_client(State)}
     end;
 
 handle_info({Tag,Socket}, State) when
