@@ -27,7 +27,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start/1]).
+-export([start/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -47,10 +47,15 @@
 	  client_chal = <<>> :: binary(),
 	  auth_timeout :: timeout(),
 	  auth_timer :: timer(),
+	  ping_timeout :: timeout(),
+	  ping_timer :: timer(),
+	  ping_time :: erlang:timestamp(),
+	  session_time :: erlang:timestamp(),
 	  tag=tcp,tag_closed=tcp_closed,tag_error=tcp_error,
 	  parent :: pid(),
-	  mon    :: reference(),  %% parent monitor
-	  socket :: xylan_socket:xylan_socket()  %% client proxy socket
+	  mon    :: reference(), %% parent monitor
+	  %% fixme: close socket if now ping arrive in time
+	  socket :: xylan_socket:xylan_socket()
 	 }).
 
 
@@ -65,8 +70,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start(AuthTimeout) ->
-    gen_server:start(?MODULE, [self(),AuthTimeout], []).
+start() ->
+    gen_server:start(?MODULE, [self()], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -83,11 +88,10 @@ start(AuthTimeout) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Parent,AuthTimeout]) ->
+init([Parent]) ->
     Mon = erlang:monitor(process, Parent),
-    {ok, #state{parent=Parent, mon = Mon, 
-		auth_timeout = AuthTimeout
-	       }}.
+    {ok, #state{parent=Parent, mon=Mon }}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -103,6 +107,27 @@ init([Parent,AuthTimeout]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+
+handle_call(get_status, _From, State) ->
+    Status =
+	if State#state.socket =/= undefined,
+	   not State#state.client_auth ->
+		AuthTimeRemain = erlang:read_timer(State#state.auth_timer),
+		[{status,auth},{auth_time_remain,AuthTimeRemain}];
+	   State#state.socket =/= undefined,
+	   State#state.client_auth ->
+		LastPing = time_since_ms(os:timestamp(),
+					 State#state.ping_time),
+		SessionTime = time_since_ms(os:timestamp(),
+					    State#state.session_time),
+		[{status,up},{session_time,SessionTime},{last_ping,LastPing}];
+	   State#state.socket =:= undefied ->
+		LastSeen = time_since_ms(os:timestamp(),
+					 State#state.session_time),
+		[{status,down},{last_seen,LastSeen}]
+	end,
+    {reply, {ok, [{id,State#state.client_id} | Status]}, State};
+
 handle_call(_Request, _From, State) ->
     ?warning("~s:handle_call: got ~p\n", [_Request]),
     Reply = {error,einval},
@@ -122,16 +147,24 @@ handle_cast({set_socket, Socket}, State) ->
     close(State#state.socket),  %% close old socket
     {T,C,E} = xylan_socket:tags(Socket),
     xylan_socket:setopts(Socket, [{active,once}]),
-    Timeout = State#state.auth_timeout,
-    TRef=erlang:start_timer(Timeout,self(),auth_timeout),
-    {noreply, State#state { socket=Socket,auth_timer=TRef,tag=T,tag_closed=C,tag_error=E }};
+    AuthTimeout = State#state.auth_timeout,
+    AuthTimer = start_timer(AuthTimeout,auth_timeout),
+    {noreply, State#state { socket=Socket,
+			    auth_timer=AuthTimer,
+			    session_time = os:timestamp(),
+			    tag=T,tag_closed=C,tag_error=E }};
 handle_cast({set_config,Conf}, State) ->
     State1 =
 	lists:foldl(
 	  fun({client_id,ID}, S)   -> S#state { client_id = ID };
 	     ({server_id,ID}, S)   -> S#state { server_id = ID };
 	     ({client_key,Key}, S) -> S#state { client_key = Key };
-	     ({server_key,Key}, S) -> S#state { server_key = Key }
+	     ({server_key,Key}, S) -> S#state { server_key = Key };
+	     ({auth_timeout,T}, S) -> S#state { auth_timeout = T };
+	     ({ping_timeout,T}, S) -> S#state { ping_timeout = T };
+	     (Item, S) ->
+		  ?warning("bad config itmer ~p", [Item]),
+		  S
 	  end, State, Conf),
     ?debug("set_config ~p", [State1]),
     {noreply, State1};
@@ -175,10 +208,15 @@ handle_info({Tag,Socket,Data}, State) when
 	    %% crypto:sha is used instead of crypto:hash R15!!
 	    case crypto:sha([State#state.client_key,State#state.client_chal]) of
 		Cred ->
-		    ?info("client ~p credential accepted", [State#state.client_id]),
-		    xylan_socket:setopts(State#state.socket, [{active,once}]),
+		    ?info("client ~p credential accepted", 
+			  [State#state.client_id]),
+		    xylan_socket:setopts(State#state.socket,[{active,once}]),
 		    cancel_timer(State#state.auth_timer),
-		    {noreply, State#state { auth_timer = undefined, client_auth = true }};
+		    PingTimer = start_timer(State#state.ping_timeout,
+					    ping_timeout),
+		    {noreply, State#state { auth_timer = undefined,
+					    ping_timer = PingTimer,
+					    client_auth = true }};
 		_CredFail ->
 		    ?info("client ~p credential failed", [State#state.client_id]),
 		    close(State#state.socket),
@@ -203,8 +241,12 @@ handle_info({Tag,Socket,Data}, State) when
     try binary_to_term(Data, [safe]) of
 	ping when State#state.client_auth =:= true ->
 	    ?debug("got session ping", []),
-	    send(State#state.socket, pong),  %% client ping, just reply with pong
-	    {noreply, State};
+	    %% client ping, just reply with pong
+	    send(State#state.socket, pong),
+	    cancel_timer(State#state.ping_timer),
+	    PingTimer = start_timer(State#state.ping_timeout,ping_timeout),
+	    {noreply, State#state { ping_time = os:timestamp(),
+				    ping_timer = PingTimer }};
 	Message ->
 	    ?warning("got session message: ~p", [Message]),
 	    {noreply, State}
@@ -219,27 +261,27 @@ handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.socket)#xylan_socket.socket ->
     ?info("client ~p close", [State#state.client_id]),
-    close(State#state.socket),
-    cancel_timer(State#state.auth_timer),
-    {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
+    {noreply, close_client(State)};
 
 handle_info({Tag,Socket,Error}, State) when
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.socket)#xylan_socket.socket ->
     ?info("client ~p error ~p", [State#state.client_id, Error]),
-    close(State#state.socket),
-    cancel_timer(State#state.auth_timer),
-    {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
+    {noreply, close_client(State)};
 
-handle_info({timeout,TRef,auth_timeout}, State) when 
+handle_info({timeout,TRef,auth_timeout}, State) when
       TRef =:= State#state.auth_timer ->
     ?info("client ~p autentication timeout", [State#state.client_id]),
-    close(State#state.socket),
-    {noreply, State#state { socket = undefined, client_auth = false, auth_timer=undefined }};
+    {noreply, close_client(State)};
+
+handle_info({timeout,TRef,ping_timeout}, State) when 
+      TRef =:= State#state.ping_timer ->
+    ?info("client ~p ping timeout", [State#state.client_id]),
+    {noreply, close_client(State)};
 
 handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) when
       Ref =:= State#state.mon ->
-    ?debug("handle_info: got: ~p\n", [_Info]),
+    ?debug("handle_info: parent died: ~p\n", [_Info]),
     {stop, _Reason, State};
 
 handle_info(_Info, State) ->
@@ -277,12 +319,33 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+time_since_ms(_T1, undefined) ->
+    never;
+time_since_ms(T1, T0) ->
+    timer:now_diff(T1, T0) div 1000.
+
+close_client(State) ->
+    close(State#state.socket),
+    cancel_timer(State#state.auth_timer),
+    cancel_timer(State#state.ping_timer),
+    State#state { socket = undefined, 
+		  client_auth = false,
+		  auth_timer=undefined,
+		  ping_timer=undefined }.
+    
+
 close(undefined) -> ok;
 close(Socket) -> xylan_socket:close(Socket).
 
-cancel_timer(Timer) when is_reference(Timer) -> 
+cancel_timer(Timer) when is_reference(Timer) ->
     erlang:cancel_timer(Timer);
-cancel_timer(undefined) -> false.
+cancel_timer(undefined) -> 
+    false.
 
+start_timer(undefined,_Tag) -> undefined;
+start_timer(infinity,_Tag) -> undefined;
+start_timer(Time,Tag) when is_integer(Time), Time >= 0 ->
+    erlang:start_timer(Time,self(),Tag).
+    
 send(Socket, Term) ->
     xylan_socket:send(Socket, term_to_binary(Term)).

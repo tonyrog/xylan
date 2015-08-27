@@ -35,12 +35,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-export([get_status/0]).
+
 -define(SERVER, ?MODULE).
 -define(DEFAULT_CNTL_PORT, 29390).   %% client proxy control port
 -define(DEFAULT_DATA_PORT, 29391).   %% client proxy data port
 -define(DEFAULT_PORT, 46122).        %% user connect port
 -define(DEFAULT_AUTH_TIMEOUT, 5000). %% timeout for authentication packet
 -define(DEFAULT_DATA_TIMEOUT, 5000). %% timeout for proxy data connection
+-define(DEFAULT_PING_TIMEOUT, 30000). %% timeout for lack of ping packet
 
 -include_lib("lager/include/log.hrl").
 -include("xylan_socket.hrl").
@@ -66,9 +69,11 @@
 
 -record(client,
 	{
-	  id :: string(),          %% name of client
-	  server_key :: binary(),   %% server side key
-	  client_key :: binary(),   %% client side key
+	  id :: string(),            %% name of client
+	  server_key :: binary(),    %% server side key
+	  client_key :: binary(),    %% client side key
+	  auth_timeout :: timeout(), %% authentication timeout value
+	  ping_timeout :: timeout(), %% ping not received timeout value
 	  pid :: pid(),             %% client process
 	  mon :: reference(),       %% monitor of above
 	  route :: [[route_config()]]  %% config
@@ -111,6 +116,23 @@ start_link() ->
 start_link(Options) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
 
+get_status() ->
+    case gen_server:call(?SERVER, get_clients) of
+	{ok,Clients} ->
+	    {ok,
+	     lists:map(
+	       fun({CName,CPid}) ->
+		       case gen_server:call(CPid, get_status) of
+			   {ok,Status} ->
+			       Status;
+			   Error ->
+			       [{id,CName},Error]
+		       end
+	       end, Clients)};
+	Error ->
+	    Error
+    end.
+    
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -132,24 +154,29 @@ init(Options) ->
     UserPorts = proplists:get_value(port,Options,?DEFAULT_PORT),
     ServerID = proplists:get_value(id,Options,""),
     AuthTimeout = proplists:get_value(auth_timeout,Options,?DEFAULT_AUTH_TIMEOUT),
-    Clients = [begin 
+    PingTimeout = proplists:get_value(ping_timeout,Options,?DEFAULT_PING_TIMEOUT),
+    Clients = [begin
 		   SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
 		   CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
 		   Route = proplists:get_value(route, ClientConf),
-		   {ok,CPid} = xylan_session:start(AuthTimeout),
+		   {ok,CPid} = xylan_session:start(),
 		   CMon = erlang:monitor(process, CPid),
-		   gen_server:cast(CPid,
-				   {set_config, [{client_id,ClientID},
-						 {server_id,ServerID},
-						 {server_key,SKey},
-						 {client_key,CKey}]}),
-		   #client {
-		      id = ClientID,
-		      server_key = SKey,
-		      client_key = CKey,
-		      pid = CPid,
-		      mon = CMon,
-		      route = Route}
+		   Config = [{client_id,ClientID},
+			     {server_id,ServerID},
+			     {server_key,SKey},
+			     {client_key,CKey},
+			     {auth_timeout,AuthTimeout},
+			     {ping_timeout,PingTimeout}
+			    ],
+		   gen_server:cast(CPid, {set_config,Config}),
+		   #client { id = ClientID,
+			     server_key = SKey,
+			     client_key = CKey,
+			     auth_timeout = AuthTimeout,
+			     ping_timeout = PingTimeout,
+			     pid = CPid,
+			     mon = CMon,
+			     route = Route }
 	       end || {ClientID,ClientConf} <- proplists:get_value(clients, Options, [])],
     {ok,CntlSock} = start_client_cntl(CntlPort),
     {ok,DataSock} = start_client_data(DataPort),
@@ -226,6 +253,11 @@ open_user_port(Port,IP) when is_integer(Port) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+
+handle_call(get_clients, _From, State) ->
+    Clients = [{C#client.id, C#client.pid} || C <- State#state.clients],
+    {reply, {ok,Clients}, State};
+    
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -352,6 +384,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 	    case take_socket(Socket, 1, State#state.auth_list) of
 		false ->
 		    ?warning("handle_info: socket not found, data=~p",[Data]),
+		    %% FIXME: close this?
 		    {noreply, State};
 		{value,{XSocket,TRef},AuthList} ->
 		    %% session socket data received
@@ -392,7 +425,9 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 	    case lists:keytake(Data,3,State#state.proxy_list) of
 		false ->
 		    ?warning("handle_info: no user found id=~p",[Data]),
-	    	    {noreply, State};
+		    xylan_socket:close(XSocket),
+		    {noreply, State#state { data_list=Ls }};
+
 		{value,{Proxy,Mon,_Data},ProxyList} ->
 		    erlang:demonitor(Mon, [flush]),
 		    xylan_socket:controlling_process(XSocket, Proxy),
@@ -447,10 +482,17 @@ handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) ->
 		    {noreply, State};
 		{value,C,Clients} ->
 		    ?debug("client stopped ~p restart client ~s", [_Reason,C#client.id]),
-		    {ok,ClientPid} = xylan_session:start(State#state.auth_timeout),
-		    ClientMon = erlang:monitor(process, ClientPid),
-		    Clients1 = [C#client { pid = ClientPid,
-					   mon = ClientMon } | Clients],
+		    {ok,CPid} = xylan_session:start(),
+		    CMon = erlang:monitor(process, CPid),
+		    Clients1 = [C#client { pid = CPid,mon = CMon } | Clients],
+		    Config =  [{client_id,C#client.id},
+			       {server_id,State#state.server_id},
+			       {server_key,C#client.server_key},
+			       {client_key,C#client.client_key},
+			       {auth_timeout,C#client.auth_timeout},
+			       {ping_timeout,C#client.ping_timeout}
+			      ],
+		    gen_server:cast(CPid,{set_config,Config}),
 		    {noreply, State#state { clients = Clients1 }}
 	    end
     end;

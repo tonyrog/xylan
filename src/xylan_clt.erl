@@ -29,6 +29,7 @@
 %% API
 -export([start_link/0]).
 -export([start_link/1]).
+-export([get_status/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -46,8 +47,6 @@
 -include_lib("lager/include/log.hrl").
 -include("xylan_socket.hrl").
 
--type timer() :: reference().
-
 -record(state,
 	{
 	  id :: string(),  %% client id
@@ -60,17 +59,19 @@
 	  server_chal :: binary(),
 	  server_auth = false :: boolean(),
 	  auth_timeout = ?DEFAULT_AUTH_TIMEOUT :: timeout(),
-	  auth :: timer(),
+	  auth_timer :: reference(),
 	  server_id  = "",
 	  server_key  :: binary(),
 	  client_key  :: binary(),
 	  ping_interval = ?DEFAULT_PING_INTERVAL :: timeout(),
 	  pong_timeout  = ?DEFAULT_PONG_TIMEOUT  :: timeout(),
+	  session_time :: erlang:timestamp(),
 	  reconnect_interval = ?DEFAULT_RECONNECT_INTERVAL :: timeout(),
 	  user_list = [] :: [{pid(),reference(),binary()}], %% user sessions
-	  reconnect :: reference(),  %% reconnect timer
-	  ping :: reference(),   %% when to send next ping, control channel
-	  pong :: reference(),   %% wdt timer for pong
+	  reconnect_timer :: reference(),  %% reconnect timer
+	  ping_timer :: reference(), %% when to send next ping, control channel
+	  pong_timer :: reference(),   %% wdt timer for pong
+	  pong_time :: erlang:timestamp(),  %% last pong time
 	  route = []
 	}).
 
@@ -91,9 +92,13 @@ start_link() ->
 start_link(Options) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
 
+get_status() ->
+    gen_server:call(?SERVER, get_status).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -144,6 +149,32 @@ init(Options) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+
+handle_call(get_status, _From, State) ->
+    Status =
+	if
+	    State#state.server_sock =/= undefined,
+	    not State#state.server_auth ->
+		AuthTimeRemain = erlang:read_timer(State#state.auth_timer),
+		[{status,auth},{auth_time_remain,AuthTimeRemain}];
+
+	    State#state.server_sock =/= undefined,
+	    State#state.server_auth ->
+		LastPong = time_since_ms(os:timestamp(),
+					 State#state.pong_time),
+		SessionTime = time_since_ms(os:timestamp(),
+					    State#state.session_time),
+		[{status,up},{session_time,SessionTime},{last_pong,LastPong}];
+	    
+	    State#state.server_sock =:= undefined ->
+		LastSeen = time_since_ms(os:timestamp(),
+					 State#state.session_time),
+		[{status,down},
+		 {reconnect_time,erlang:read_timer(State#state.auth_timer)},
+		 {last_seen,LastSeen}]
+	end,
+    {reply, {ok, [{server_id, State#state.server_id} | Status]}, State};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -185,19 +216,21 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 	    case crypto:sha([State#state.server_key,State#state.server_chal]) of
 		Cred ->
 		    ?debug("handle_info: credential from server ~p ok", [ServerID]),
-		    cancel_timer(State#state.auth),
+		    cancel_timer(State#state.auth_timer),
 		    %% crypto:sha is used instead of crypto:hash R15!!
 		    Cred1 = crypto:sha([State#state.client_key,Chal]),
 		    send(State#state.server_sock, {auth_ack,[{id,State#state.id},{cred,Cred1}]}),
-		    Ping = erlang:start_timer(State#state.ping_interval, self(), ping),
-		    {noreply, State#state { server_id = ServerID, server_auth = true,
-					    auth = undefined, ping = Ping }};
+		    PingTimer = start_timer(State#state.ping_interval,ping),
+		    {noreply, State#state { server_id = ServerID, 
+					    server_auth = true,
+					    auth_timer = undefined,
+					    ping_timer = PingTimer }};
 		_CredFail ->
 		    ?debug("handle_info: credential failed"),
 		    close(State#state.server_sock),
 		    TRef = reconnect_after(State#state.reconnect_interval),
 		    {noreply, State#state { server_sock=undefined, server_auth=false,
-					    reconnect=TRef }}
+					    reconnect_timer=TRef }}
 	    end;
 	_Mesg ->
 	    ?warning("handle_info: (control channel) unkown ~p", [_Mesg]),
@@ -214,11 +247,14 @@ handle_info(_Info={Tag,Socket,Data}, State) when
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     xylan_socket:setopts(State#state.server_sock, [{active, once}]),
     try binary_to_term(Data, [safe]) of
-	pong when State#state.ping =:= undefined ->
+	pong when State#state.ping_timer =:= undefined ->
 	    ?debug("handle_info: (control channel) pong"),
-	    cancel_timer(State#state.pong),
-	    Ping = erlang:start_timer(State#state.ping_interval, self(), ping),
-	    {noreply, State#state { pong = undefined, ping = Ping }};
+	    cancel_timer(State#state.pong_timer),
+	    Ping = start_timer(State#state.ping_interval, ping),
+	    PongTime = os:timestamp(),
+	    {noreply, State#state { pong_timer = undefined, 
+				    pong_time = PongTime,
+				    ping_timer = Ping }};
 	pong ->
 	    ?debug("handle_info: (control channel) spourius pong", []),
 	    {noreply, State};
@@ -255,81 +291,53 @@ handle_info(_Info={Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     ?debug("handle_info: (control channel) ~p", [_Info]),
-    close(State#state.server_sock),
-    cancel_timer(State#state.auth),
-    cancel_timer(State#state.pong),
-    cancel_timer(State#state.ping),
-    TRef = reconnect_after(State#state.reconnect_interval),
-    {noreply, State#state { server_sock = undefined, reconnect=TRef,
-			    ping=undefined,pong=undefined,auth=undefined }};
+    State1 = close_server(State),
+    Timer = reconnect_after(State1#state.reconnect_interval),
+    {noreply, State1#state { reconnect_timer=Timer }};
 
 %% data socket got error before proxy established
 handle_info(_Info={Tag,Socket,_Error}, State) when 
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     ?debug("handle_info: (data channel) ~p", [_Info]),
-    close(State#state.server_sock),
-    cancel_timer(State#state.auth),
-    cancel_timer(State#state.pong),
-    cancel_timer(State#state.ping),
-    TRef = reconnect_after(State#state.reconnect_interval),
-    {noreply, State#state { server_sock = undefined, reconnect=TRef,
-			    ping=undefined,pong=undefined,auth=undefined }};
+    State1 = close_server(State),
+    Timer = reconnect_after(State1#state.reconnect_interval),
+    {noreply, State1#state { reconnect_timer=Timer }};
 
-handle_info({timeout,T,reconnect}, State) when T =:= State#state.reconnect ->
-    %% a bit ugly
-    handle_info(reconnect, State#state { reconnect = undefined });
+handle_info({timeout,T,reconnect}, State) when 
+      T =:= State#state.reconnect_timer ->
+    {noreply,connect_server(State#state { reconnect_timer = undefined })};
+
 handle_info(reconnect, State) when State#state.server_sock =:= undefined ->
-    case xylan_socket:connect(State#state.server_ip,State#state.server_port,
-			    [{mode,binary},{packet,4},{nodelay,true}],
-			    3000) of
-	{ok, Socket} ->
-	    ?debug("server ~p:~p connected", 
-		   [State#state.server_ip,State#state.server_port]),
-	    Chal = crypto:rand_bytes(16),
-	    send(Socket, {auth_req,[{id,State#state.id},{chal,Chal}]}),
-	    xylan_socket:setopts(Socket, [{active, once}]),
-	    TRef = erlang:start_timer(State#state.auth_timeout, self(), auth_timeout),
-	    {T,C,E} = xylan_socket:tags(Socket),
-	    {noreply, State#state { server_sock = Socket,
-				    server_chal = Chal,
-				    server_auth = false,
-				    auth = TRef,
-				    tag=T, tag_closed=C, tag_error=E }};
-	Error ->
-	    ?warning("server not connected, ~p", [Error]),
-	    TRef = reconnect_after(State#state.reconnect_interval),
-	    {noreply, State#state { reconnect=TRef }}
-    end;
+    {noreply,connect_server(State)};
 
-handle_info({timeout,T,ping}, State) when T =:= State#state.ping ->
+handle_info({timeout,T,ping}, State) when T =:= State#state.ping_timer ->
     if State#state.server_sock =/= undefined ->
 	    ?debug("ping timeout send ping"),
 	    send(State#state.server_sock, ping),
-	    Timeout = State#state.pong_timeout,
-	    Pong=erlang:start_timer(Timeout, self(),pong),
-	    {noreply, State#state { ping=undefined, pong=Pong}};
+	    Timer = start_timer(State#state.pong_timeout, pong),
+	    {noreply, State#state { ping_timer=undefined, pong_timer=Timer}};
        true ->
 	    ?debug("old ping timeout?"),
 	    {noreply, State}
     end;
 
-handle_info({timeout,T,pong}, State) when T =:= State#state.pong ->
+handle_info({timeout,T,pong}, State) when T =:= State#state.pong_timer ->
     if State#state.server_sock =/= undefined ->
 	    ?debug("pong timeout reconnect socket"),
-	    close(State#state.server_sock),
-	    TRef = reconnect_after(State#state.reconnect_interval),
-	    {noreply, State#state { server_sock=undefined, pong=undefined,reconnect=TRef}};
+	    State1 = close_server(State),
+	    Timer = reconnect_after(State1#state.reconnect_interval),
+	    {noreply, State1#state { reconnect_timer=Timer }};
        true ->
 	    ?debug("old pong timeout?"),
 	    {noreply, State}
     end;
 
-handle_info({timeout,T,auth_timeout}, State) when T =:= State#state.auth ->
+handle_info({timeout,T,auth_timeout}, State) when T=:=State#state.auth_timer ->
     ?debug("auth timeout, reconnect"),
-    TRef = reconnect_after(State#state.reconnect_interval),
-    close(State#state.server_sock),
-    {noreply, State#state { server_sock=undefined, auth=undefined, reconnect=TRef}};
+    State1 = close_server(State),
+    Timer = reconnect_after(State1#state.reconnect_interval),
+    {noreply, State1#state { reconnect_timer=Timer }};
 
 handle_info(_Info, State) ->
     ?warning("handle_info: got: ~p\n", [_Info]),
@@ -364,11 +372,58 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+time_since_ms(_T1, undefined) ->
+    never;
+time_since_ms(T1, T0) ->
+    timer:now_diff(T1, T0) div 1000.
+
+connect_server(State) ->
+    case xylan_socket:connect(State#state.server_ip,State#state.server_port,
+			      [{mode,binary},{packet,4},{nodelay,true}],
+			      3000) of
+	{ok, Socket} ->
+	    ?debug("server ~p:~p connected", 
+		   [State#state.server_ip,State#state.server_port]),
+	    Chal = crypto:rand_bytes(16),
+	    send(Socket, {auth_req,[{id,State#state.id},{chal,Chal}]}),
+	    xylan_socket:setopts(Socket, [{active, once}]),
+	    Timer = start_timer(State#state.auth_timeout, auth_timeout),
+	    {T,C,E} = xylan_socket:tags(Socket),
+	    State#state { server_sock = Socket,
+			  server_chal = Chal,
+			  server_auth = false,
+			  auth_timer = Timer,
+			  session_time = os:timestamp(),
+			  tag=T, tag_closed=C, tag_error=E };
+	Error ->
+	    ?warning("server not connected, ~p", [Error]),
+	    Timer = reconnect_after(State#state.reconnect_interval),
+	    State#state { reconnect_timer=Timer }
+    end.
+    
+close_server(State) ->
+    close(State#state.server_sock),
+    cancel_timer(State#state.auth_timer),
+    cancel_timer(State#state.pong_timer),
+    cancel_timer(State#state.ping_timer),
+    State#state { server_sock = undefined, 
+		  server_auth = false,
+		  auth_timer = undefined,
+		  pong_timer = undefined,
+		  ping_timer = undefined
+		}.
+
+
 close(undefined) -> ok;
 close(Socket) -> xylan_socket:close(Socket).
 
 cancel_timer(undefined) -> false;
 cancel_timer(Timer) -> erlang:cancel_timer(Timer).
+
+start_timer(undefined,_Tag) -> undefined;
+start_timer(infinity,_Tag) -> undefined;
+start_timer(Time,Tag) when is_integer(Time), Time >= 0 ->
+    erlang:start_timer(Time,self(),Tag).
 
 reconnect_after(Timeout) ->
     erlang:start_timer(Timeout, self(),reconnect).

@@ -27,7 +27,47 @@
 -module(xylan).
 
 -export([start/0]).
+-export([status/0]).
+-export([generate_key/0]).
 
 start() ->
     lager:start(),
     application:start(xylan).
+
+status() ->
+    Env = application:get_all_env(xylan),
+    case proplists:get_value(mode,Env) of    
+	client ->
+	    case xylan_clt:get_status() of
+		{ok,Status} ->
+		    format_prop_list(Status);
+		_Error ->
+		    io:format("error: ~p\n", [_Error])
+	    end;
+	server ->
+	    case xylan_srv:get_status() of
+		{ok,StatusLists} ->
+		    lists:foreach(fun format_prop_list/1, StatusLists);
+		_Error ->
+		    io:format("error: ~p\n", [_Error])
+	    end
+    end.
+
+format_prop_list(PropList) ->
+    lists:foreach(fun display_prop/1, PropList),
+    io:format("\n", []).
+		    
+display_prop({K,V}) ->
+    Key = atom_to_list(K),
+    Value = if is_integer(V) -> integer_to_list(V);
+	       is_atom(V) -> atom_to_list(V);
+	       is_list(V) -> V
+	    end,
+    io:format("~s=~s ", [Key,Value]).
+
+%% Generate a 64-bit random key used for signing packets
+generate_key() ->
+    <<X:64>> = crypto:rand_bytes(8),
+    X.
+
+    
