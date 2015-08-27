@@ -121,12 +121,10 @@ handle_call(get_status, _From, State) ->
 		SessionTime = time_since_ms(os:timestamp(),
 					    State#state.session_time),
 		[{status,up},{session_time,SessionTime},{last_ping,LastPing}];
-	   State#state.socket =:= undefied ->
+	   State#state.socket =:= undefined ->
 		LastSeen = time_since_ms(os:timestamp(),
 					 State#state.session_time),
-		[{status,down},{last_seen,LastSeen}];
-	   true ->
-		[{client_auth, State#state.client_auth}]
+		[{status,down},{last_seen,LastSeen}]
 	end,
     {reply, {ok, [{id,State#state.client_id} | Status]}, State};
 
