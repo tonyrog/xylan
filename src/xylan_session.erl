@@ -124,7 +124,9 @@ handle_call(get_status, _From, State) ->
 	   State#state.socket =:= undefied ->
 		LastSeen = time_since_ms(os:timestamp(),
 					 State#state.session_time),
-		[{status,down},{last_seen,LastSeen}]
+		[{status,down},{last_seen,LastSeen}];
+	   true ->
+		[{client_auth, State#state.client_auth}]
 	end,
     {reply, {ok, [{id,State#state.client_id} | Status]}, State};
 
