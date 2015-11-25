@@ -158,6 +158,7 @@ init(Options) ->
     Clients = [begin
 		   SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
 		   CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
+		   %% CPingTimeout = proplists:get_value(ping_timeout,ClientConf,PingTimeout),
 		   Route = proplists:get_value(route, ClientConf),
 		   {ok,CPid} = xylan_session:start(),
 		   CMon = erlang:monitor(process, CPid),
