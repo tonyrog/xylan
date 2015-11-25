@@ -39,9 +39,6 @@
 -export([auth_incoming/2, authenticate/1]).
 
 -include("xylan_socket.hrl").
--include_lib("lager/include/log.hrl").
-
--define(dbg(F, A), ?debug("~p " ++ F, [self()|A])).
 
 %%
 %% List of protocols supported
@@ -64,7 +61,7 @@ listen(Port, Protos=[tcp|_], Opts0) ->
     Opts1 = proplists:expand([{binary, [{mode, binary}]},
 			      {list, [{mode, list}]}], Opts0),
     {TcpOpts, Opts2} = split_options(tcp_listen_options(), Opts1),
-    ?dbg("xylan_socket: listen options=~w, other=~w\n", [TcpOpts, Opts2]),
+    lager:debug("listen options=~w, other=~w\n", [TcpOpts, Opts2]),
     Active = proplists:get_value(active, TcpOpts, false),
     Mode   = proplists:get_value(mode, TcpOpts, list),
     Packet = proplists:get_value(packet, TcpOpts, 0),
@@ -133,7 +130,7 @@ maybe_auth(X, Opts) ->
 maybe_auth(X, Role, Opts) ->
     case proplists:get_bool(delay_auth, Opts) of
 	true ->
-	    ?dbg("Delaying authentication~n", []),
+	    lager:debug("Delaying authentication~n", []),
 	    X;
 	false ->
 	    maybe_auth_(X, Role, Opts)
@@ -145,16 +142,16 @@ maybe_auth_({ok,X}, Role0, Opts) ->
 	    {ok, X};
 	L when is_list(L) ->
 	    Role = proplists:get_value(role, L, Role0),
-	    ?dbg("auth opts = ~p~nRole = ~p~n", [L, Role]),
+	    lager:debug("auth opts = ~p~nRole = ~p~n", [L, Role]),
 	    %% Here, we should check if the session is already authenticated
 	    %% Otherwise, initiate user-level authentication.
 	    case lists:keyfind(Role, 1, L) of
 		false -> {ok, X};
 		{_, ROpts} ->
-		    ?dbg("ROpts = ~p~n", [ROpts]),
+		    lager:debug("ROpts = ~p~n", [ROpts]),
 		    case lists:keyfind(mod, 1, ROpts) of
 			{_, M} ->
-			    ?dbg("will authenticate (M = ~p~n", [M]),
+			    lager:debug("will authenticate (M = ~p~n", [M]),
 			    try preserve_active(
 				  fun() ->
 					  M:authenticate(X, Role, ROpts)
@@ -166,12 +163,12 @@ maybe_auth_({ok,X}, Role0, Opts) ->
 				    shutdown(X, write),
 				    {error, einval};
 				Other ->
-				    ?error("authenticate returned ~p~n",
+				    lager:error("authenticate returned ~p~n",
 					   [Other]),
 				    {error, Other}
 			    catch
 				error:Err ->
-				    ?dbg("Caught error: ~p~n"
+				    lager:debug("Caught error: ~p~n"
 					 "Trace = ~p~n",
 					 [Err, erlang:get_stacktrace()]),
 				    shutdown(X, write),
@@ -191,10 +188,10 @@ preserve_active(F, S) ->
     Res.
 
 authenticate(#xylan_socket{mauth = undefined} = XS) ->
-    ?dbg("authenticate(~p)~n", [XS]),
+    lager:debug("authenticate(~p)~n", [XS]),
     maybe_auth({ok,XS}, XS#xylan_socket.opts);
 authenticate(#xylan_socket{} = XS) ->
-    ?dbg("No authentication options defined.~n", []),
+    lager:debug("No authentication options defined.~n", []),
     {ok, XS}.
 
 auth_incoming(#xylan_socket{mauth = undefined}, Data) ->
@@ -209,18 +206,18 @@ auth_incoming(#xylan_socket{mauth = M, auth_state = Sa} = X, Data) ->
 
 
 connect_upgrade(X, Protos0, Timeout) ->
-    ?dbg("xylan_socket: connect protos=~w\n", [Protos0]),
+    lager:debug("connect protos=~w\n", [Protos0]),
     case Protos0 of
 	[ssl|Protos1] ->
 	    Opts = X#xylan_socket.opts,
 	    {SSLOpts0,Opts1} = split_options(ssl_connect_opts(),Opts),
 	    {_,SSLOpts} = split_options([ssl_imp], SSLOpts0),
-	    ?dbg("SSL upgrade, options = ~w\n", [SSLOpts]),
-	    ?dbg("xylan_socket: before ssl:connect opts=~w\n", 
+	    lager:debug("SSL upgrade, options = ~w\n", [SSLOpts]),
+	    lager:debug("before ssl:connect opts=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    case ssl_connect(X#xylan_socket.socket, SSLOpts, Timeout) of
 		{ok,S1} ->
-		    ?dbg("xylan_socket: ssl:connect opt=~w\n", 
+		    lager:debug("ssl:connect opt=~w\n", 
 			 [ssl:getopts(S1, [active,packet,mode])]),
 		    X1 = X#xylan_socket { socket=S1,
 					mdata = ssl,
@@ -229,8 +226,7 @@ connect_upgrade(X, Protos0, Timeout) ->
 					tags={ssl,ssl_closed,ssl_error}},
 		    connect_upgrade(X1, Protos1, Timeout);
 		Error={error,_Reason} ->
-		    ?dbg("xylan_socket: ssl:connect error=~w\n", 
-			 [_Reason]),
+		    lager:warning("ssl:connect error=~w\n", [_Reason]),
 		    Error
 	    end;
 	[http|Protos1] ->
@@ -242,7 +238,7 @@ connect_upgrade(X, Protos0, Timeout) ->
 	    setopts(X, [{mode,X#xylan_socket.mode},
 			{packet,X#xylan_socket.packet},
 			{active,X#xylan_socket.active}]),
-	    ?dbg("xylan_socket: after upgrade opts=~w\n", 
+	    lager:debug("after upgrade opts=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    {ok,X}
     end.
@@ -314,7 +310,7 @@ accept(X, Timeout) when
     accept_upgrade(X, X#xylan_socket.protocol, Timeout).
 
 accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
-    ?dbg("xylan_socket: accept protos=~w\n", [Protos0]),
+    lager:debug("accept protos=~w\n", [Protos0]),
     case Protos0 of
 	[tcp|Protos1] ->
 	    case M:accept(X#xylan_socket.socket, Timeout) of
@@ -328,12 +324,12 @@ accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
 	    Opts = X#xylan_socket.opts,
 	    {SSLOpts0,Opts1} = split_options(ssl_listen_opts(),Opts),
 	    {_,SSLOpts} = split_options([ssl_imp], SSLOpts0),
-	    ?dbg("SSL upgrade, options = ~w\n", [SSLOpts]),
-	    ?dbg("xylan_socket: before ssl_accept opt=~w\n", 
+	    lager:debug("SSL upgrade, options = ~w\n", [SSLOpts]),
+	    lager:debug("before ssl_accept opt=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    case ssl_accept(X#xylan_socket.socket, SSLOpts, Timeout) of
 		{ok,S1} ->
-		    ?dbg("xylan_socket: ssl_accept opt=~w\n", 
+		    lager:debug("ssl_accept opt=~w\n", 
 			 [ssl:getopts(S1, [active,packet,mode])]),
 		    X1 = X#xylan_socket{socket=S1,
 				      mdata = ssl,
@@ -342,7 +338,7 @@ accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
 				      tags={ssl,ssl_closed,ssl_error}},
 		    accept_upgrade(X1, Protos1, Timeout);
 		Error={error,_Reason} ->
-		    ?dbg("xylan_socket: ssl:ssl_accept error=~w\n", 
+		    lager:warning("ssl:ssl_accept error=~w\n", 
 			 [_Reason]),
 		    Error
 	    end;
@@ -357,7 +353,7 @@ accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
 	    setopts(X, [{mode,X#xylan_socket.mode},
 			{packet,X#xylan_socket.packet},
 			{active,X#xylan_socket.active}]),
-	    ?dbg("xylan_socket: after upgrade opts=~w\n", 
+	    lager:debug("after upgrade opts=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    {ok,X}
     end.
@@ -366,32 +362,32 @@ accept_probe_ssl(X=#xylan_socket { mdata=M, socket=S,
 				 tags = {TData,TClose,TError}},
 		 Protos,
 		 Timeout) ->
-    ?dbg("xylan_socket: accept_probe_ssl protos=~w\n", [Protos]),
+    lager:debug("accept_probe_ssl protos=~w\n", [Protos]),
     setopts(X, [{active,once}]),
     receive
 	{TData, S, Data} ->
-	    ?dbg("Accept data=~w\n", [Data]),
+	    lager:debug("Accept data=~w\n", [Data]),
 	    case request_type(Data) of
 		ssl ->
-		    ?dbg("request type: ssl\n",[]),
+		    lager:debug("request type: ssl\n",[]),
 		    ok = M:unrecv(S, Data),
-		    ?dbg("~w:unrecv(~w, ~w)\n", [M,S,Data]),
+		    lager:debug("~w:unrecv(~w, ~w)\n", [M,S,Data]),
 		    %% insert ssl after transport
 		    Protos1 = X#xylan_socket.protocol--([probe_ssl|Protos]),
 		    Protos2 = Protos1 ++ [ssl|Protos],
 		    accept_upgrade(X#xylan_socket{protocol=Protos2},
 				   [ssl|Protos],Timeout);
 		_ -> %% not ssl
-		    ?dbg("request type: NOT ssl\n",[]),
+		    lager:debug("request type: NOT ssl\n",[]),
 		    ok = M:unrecv(S, Data),
-		    ?dbg("~w:unrecv(~w, ~w)\n", [M,S,Data]),
+		    lager:debug("~w:unrecv(~w, ~w)\n", [M,S,Data]),
 		    accept_upgrade(X,Protos,Timeout)
 	    end;
 	{TClose, S} ->
-	    ?dbg("accept_probe_ssl: closed\n", []),
+	    lager:debug("closed\n", []),
 	    {error, closed};
 	{TError, S, Error} ->
-	    ?dbg("accept_probe_ssl: error ~w\n", [Error]),
+	    lager:warning("error ~w\n", [Error]),
 	    Error
     end.
 

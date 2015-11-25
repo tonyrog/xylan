@@ -35,7 +35,6 @@
 
 -type timer() :: reference().
 
--include_lib("lager/include/log.hrl").
 -include("xylan_socket.hrl").
 
 -record(state, {
@@ -129,7 +128,7 @@ handle_call(get_status, _From, State) ->
     {reply, {ok, [{id,State#state.client_id} | Status]}, State};
 
 handle_call(_Request, _From, State) ->
-    ?warning("~s:handle_call: got ~p\n", [_Request]),
+    lager:warning("~s:handle_call: got ~p\n", [_Request]),
     Reply = {error,einval},
     {reply, Reply, State}.
 
@@ -162,27 +161,27 @@ handle_cast({set_config,Conf}, State) ->
 	     ({auth_timeout,T}, S) -> S#state { auth_timeout = T };
 	     ({ping_timeout,T}, S) -> S#state { ping_timeout = T };
 	     (Item, S) ->
-		  ?warning("bad config itmer ~p", [Item]),
+		  lager:warning("bad config itmer ~p", [Item]),
 		  S
 	  end, State, Conf),
-    ?debug("set_config ~p", [State1]),
+    lager:debug("set_config ~p", [State1]),
     {noreply, State1};
 %% server has set config and accepted the challange go on and issue the challenge
 handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
       State#state.client_auth =:= false ->
-    ?debug("auth_req: ~p", [_Req]),
+    lager:debug("auth_req: ~p", [_Req]),
     Chal1 = crypto:rand_bytes(16),  %% generate challenge
     %% crypto:sha is used instead of crypto:hash R15!!
     Cred = crypto:sha([State#state.server_key,Chal]), %% server cred
     send(State#state.socket, {auth_res,[{id,State#state.server_id},{chal,Chal1},{cred,Cred}]}),
-    ?info("client ~p reply and challenge sent", [State#state.client_id]),
+    lager:info("client ~p reply and challenge sent", [State#state.client_id]),
     {noreply, State#state { client_chal = Chal1 }};
 handle_cast(Route={route,_DataPort,_SessionKey,_RouteInfo}, State) when
       State#state.client_auth =:= true ->
     send(State#state.socket,Route),
     {noreply, State};
 handle_cast(_Msg, State) ->
-    ?debug("handle_cast: got ~p (client_auth=~p, socket=~p\n", 
+    lager:debug("got ~p (client_auth=~p, socket=~p\n", 
 	   [_Msg,State#state.client_auth, State#state.socket]),
     {noreply, State}.
 
@@ -203,11 +202,11 @@ handle_info({Tag,Socket,Data}, State) when
       State#state.client_auth =:= false ->
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_ack, [{id,_ClientID},{cred,Cred}]} ->
-	    ?debug("auth_ack: ~p", [_Mesg]),
+	    lager:debug("auth_ack: ~p", [_Mesg]),
 	    %% crypto:sha is used instead of crypto:hash R15!!
 	    case crypto:sha([State#state.client_key,State#state.client_chal]) of
 		Cred ->
-		    ?info("client ~p credential accepted", 
+		    lager:info("client ~p credential accepted", 
 			  [State#state.client_id]),
 		    xylan_socket:setopts(State#state.socket,[{active,once}]),
 		    cancel_timer(State#state.auth_timer),
@@ -217,17 +216,18 @@ handle_info({Tag,Socket,Data}, State) when
 					    ping_timer = PingTimer,
 					    client_auth = true }};
 		_CredFail ->
-		    ?info("client ~p credential failed", 
+		    lager:info("client ~p credential failed", 
 			  [State#state.client_id]),
 		    {noreply, close_client(State)}
 	    end;
 	_Mesg ->
-	    ?info("client ~p authentication failed (bad message)", 
+	    lager:info("client ~p authentication failed (bad message)", 
 		  [State#state.client_id]),
 	    {noreply, close_client(State)}
     catch
 	error:Reason ->
-	    ?error("client ~p authentication,bad data ~p", [{error,Reason}]),
+	    lager:error("client ~p authentication,bad data ~p", 
+			[{error,Reason}]),
 	    {noreply, close_client(State)}
     end;
 
@@ -237,7 +237,7 @@ handle_info({Tag,Socket,Data}, State) when
     xylan_socket:setopts(State#state.socket, [{active,once}]),
     try binary_to_term(Data, [safe]) of
 	ping when State#state.client_auth =:= true ->
-	    ?debug("got session ping", []),
+	    lager:debug("got session ping", []),
 	    %% client ping, just reply with pong
 	    send(State#state.socket, pong),
 	    cancel_timer(State#state.ping_timer),
@@ -245,43 +245,43 @@ handle_info({Tag,Socket,Data}, State) when
 	    {noreply, State#state { ping_time = os:timestamp(),
 				    ping_timer = Timer }};
 	Message ->
-	    ?warning("got session message: ~p", [Message]),
+	    lager:warning("got session message: ~p", [Message]),
 	    {noreply, State}
     catch
 	error:Reason ->
-	    ?error("bad session data ~p", [{error,Reason}]),
+	    lager:error("bad session data ~p", [{error,Reason}]),
 	    {noreply, close_client(State)}
     end;
 
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.socket)#xylan_socket.socket ->
-    ?info("client ~p close", [State#state.client_id]),
+    lager:info("client ~p close", [State#state.client_id]),
     {noreply, close_client(State)};
 
 handle_info({Tag,Socket,Error}, State) when
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.socket)#xylan_socket.socket ->
-    ?info("client ~p error ~p", [State#state.client_id, Error]),
+    lager:info("client ~p error ~p", [State#state.client_id, Error]),
     {noreply, close_client(State)};
 
 handle_info({timeout,TRef,auth_timeout}, State) when
       TRef =:= State#state.auth_timer ->
-    ?info("client ~p autentication timeout", [State#state.client_id]),
+    lager:info("client ~p autentication timeout", [State#state.client_id]),
     {noreply, close_client(State)};
 
 handle_info({timeout,TRef,ping_timeout}, State) when 
       TRef =:= State#state.ping_timer ->
-    ?info("client ~p ping timeout", [State#state.client_id]),
+    lager:info("client ~p ping timeout", [State#state.client_id]),
     {noreply, close_client(State)};
 
 handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) when
       Ref =:= State#state.mon ->
-    ?debug("handle_info: parent died: ~p\n", [_Info]),
+    lager:debug("parent died: ~p\n", [_Info]),
     {stop, _Reason, State};
 
 handle_info(_Info, State) ->
-    ?warning("handle_info: got ~p\n", [_Info]),
+    lager:warning("unexpected info ~p\n", [_Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -296,7 +296,7 @@ handle_info(_Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
-    ?debug("terminate ~p", [_Reason]),
+    lager:debug("~p", [_Reason]),
     close(State#state.socket),
     ok.
 

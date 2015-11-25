@@ -1,3 +1,4 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
 %%% Copyright (C) 2007 - 2015, Rogvall Invest AB, <tony@rogvall.se>
@@ -15,7 +16,7 @@
 %%%
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
-%%% @author Malotte Westma Lonne <malotte@malotte.net>
+%%% @author Malotte Westman Lönne <malotte@malotte.net>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
 %%%    Proxy wedding ssh with host menu.
@@ -24,8 +25,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(xylan_menu).
-
--include_lib("lager/include/log.hrl").
 
 -export([spec/0, example/0, menu/0]).
 
