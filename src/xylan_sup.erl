@@ -39,9 +39,12 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    Env = application:get_all_env(xylan),
-    C = case proplists:get_value(mode,Env) of
-	    server -> ?CHILD(xylan_srv, [Env], worker);
-	    client -> ?CHILD(xylan_clt, [Env], worker)
+    Child =
+	case application:get_env(xylan, mode) of
+	    {ok,client} ->
+		?CHILD(xylan_clt, [], worker);
+	    {ok,server} ->
+		?CHILD(xylan_srv, [], worker)
 	end,
-    {ok, { {one_for_one, 5, 10}, [C]} }.
+    {ok, { {one_for_one, 5, 10}, [Child]} }.
+

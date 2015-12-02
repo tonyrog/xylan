@@ -29,15 +29,17 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, start_link/1]).
+-export([start_link/0]).
+-export([start_link/1]).
+-export([get_status/0]).
+-export([config_change/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--export([get_status/0]).
-
 -define(SERVER, ?MODULE).
+
 -define(DEFAULT_CNTL_PORT, 29390).   %% client proxy control port
 -define(DEFAULT_DATA_PORT, 29391).   %% client proxy data port
 -define(DEFAULT_PORT, 46122).        %% user connect port
@@ -131,6 +133,9 @@ get_status() ->
 	Error ->
 	    Error
     end.
+
+config_change(Changed,New,Removed) ->
+    gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
     
 %%%===================================================================
 %%% gen_server callbacks
@@ -147,13 +152,14 @@ get_status() ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init(Options) ->
-    CntlPort = proplists:get_value(client_port,Options,?DEFAULT_CNTL_PORT),
-    DataPort = proplists:get_value(data_port,Options,?DEFAULT_DATA_PORT),
-    UserPorts = proplists:get_value(port,Options,?DEFAULT_PORT),
-    ServerID = proplists:get_value(id,Options,""),
-    AuthTimeout = proplists:get_value(auth_timeout,Options,?DEFAULT_AUTH_TIMEOUT),
-    PingTimeout = proplists:get_value(ping_timeout,Options,?DEFAULT_PING_TIMEOUT),
+init(Args0) ->
+    Args = Args0 ++ application:get_all_env(xylan),
+    CntlPort = proplists:get_value(client_port,Args,?DEFAULT_CNTL_PORT),
+    DataPort = proplists:get_value(data_port,Args,?DEFAULT_DATA_PORT),
+    UserPorts = proplists:get_value(port,Args,?DEFAULT_PORT),
+    ServerID = proplists:get_value(id,Args,""),
+    AuthTimeout = proplists:get_value(auth_timeout,Args,?DEFAULT_AUTH_TIMEOUT),
+    PingTimeout = proplists:get_value(ping_timeout,Args,?DEFAULT_PING_TIMEOUT),
     Clients = [begin
 		   SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
 		   CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
@@ -177,14 +183,14 @@ init(Options) ->
 			     pid = CPid,
 			     mon = CMon,
 			     route = Route }
-	       end || {ClientID,ClientConf} <- proplists:get_value(clients, Options, [])],
+	       end || {ClientID,ClientConf} <- proplists:get_value(clients, Args, [])],
     {ok,CntlSock} = start_client_cntl(CntlPort),
     {ok,DataSock} = start_client_data(DataPort),
     UserSocks = start_user(UserPorts),
     {ok,CntlRef} = xylan_socket:async_accept(CntlSock),
     {ok,DataRef} = xylan_socket:async_accept(DataSock),
-    AuthTimeout = proplists:get_value(auth_timeout,Options,?DEFAULT_AUTH_TIMEOUT),
-    DataTimeout = proplists:get_value(data_timeout,Options,?DEFAULT_DATA_TIMEOUT),
+    AuthTimeout = proplists:get_value(auth_timeout,Args,?DEFAULT_AUTH_TIMEOUT),
+    DataTimeout = proplists:get_value(data_timeout,Args,?DEFAULT_DATA_TIMEOUT),
     {ok, #state{ server_id = ServerID,
 		 cntl_sock=CntlSock, cntl_port = CntlPort, cntl_ref=CntlRef,
 		 data_sock=DataSock, data_port = DataPort, data_ref=DataRef,
@@ -257,10 +263,14 @@ open_user_port(Port,IP) when is_integer(Port) ->
 handle_call(get_clients, _From, State) ->
     Clients = [{C#client.id, C#client.pid} || C <- State#state.clients],
     {reply, {ok,Clients}, State};
+
+handle_call({config_change,_Changed,_New,_Removed},_From,S) ->
+    io:format("config_change changed=~p, new=~p, removed=~p\n",
+	      [_Changed,_New,_Removed]),
+    {reply, ok, S};
     
 handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+    {reply, {error, bad_call}, State}.
 
 %%--------------------------------------------------------------------
 %% @private

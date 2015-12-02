@@ -20,7 +20,7 @@
 
 %% Application callbacks
 -export([start/2, stop/1]).
-
+-export([config_change/3]).
 %% ===================================================================
 %% Application callbacks
 %% ===================================================================
@@ -30,3 +30,17 @@ start(_StartType, _StartArgs) ->
 
 stop(_State) ->
     ok.
+
+%% application changed config callback
+config_change(Changed,New,Removed) ->
+    case erlang:whereis(xylan_srv) of
+	undefined ->
+	    case erlang:whereis(xylan_clt) of
+		undefined ->
+		    ok;
+		Clt when is_pid(Clt) ->
+		    xylan_clt:config_change(Changed,New,Removed)
+	    end;
+	Srv when is_pid(Srv) ->
+	    xylan_srv:config_change(Changed,New,Removed)
+    end.

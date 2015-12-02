@@ -30,6 +30,7 @@
 -export([start_link/0]).
 -export([start_link/1]).
 -export([get_status/0]).
+-export([config_change/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -94,6 +95,9 @@ start_link(Options) ->
 get_status() ->
     gen_server:call(?SERVER, get_status).
 
+config_change(Changed,New,Removed) ->
+    gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -110,17 +114,18 @@ get_status() ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init(Options) ->
-    ID = proplists:get_value(id,Options,""),  %% reject if not set ?
-    IP = proplists:get_value(server_ip,Options,"127.0.0.1"),
-    Port = proplists:get_value(server_port,Options,?DEFAULT_CNTL_PORT),
-    Route = proplists:get_value(route,Options,[]),
-    PingInterval = proplists:get_value(ping_interval,Options,?DEFAULT_PING_INTERVAL),
-    PongTimeout = proplists:get_value(pong_timeout,Options,?DEFAULT_PONG_TIMEOUT),
-    ReconnectInterval = proplists:get_value(reconnect_interval,Options,?DEFAULT_RECONNECT_INTERVAL),
-    ClientKey = xylan_lib:make_key(proplists:get_value(client_key,Options)),
-    ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Options)),
-    Authtimeout = proplists:get_value(auth_timeout,Options),
+init(Args0) ->
+    Args = Args0 ++ application:get_all_env(xylan),
+    ID = proplists:get_value(id,Args,""),  %% reject if not set ?
+    IP = proplists:get_value(server_ip,Args,"127.0.0.1"),
+    Port = proplists:get_value(server_port,Args,?DEFAULT_CNTL_PORT),
+    Route = proplists:get_value(route,Args,[]),
+    PingInterval = proplists:get_value(ping_interval,Args,?DEFAULT_PING_INTERVAL),
+    PongTimeout = proplists:get_value(pong_timeout,Args,?DEFAULT_PONG_TIMEOUT),
+    ReconnectInterval = proplists:get_value(reconnect_interval,Args,?DEFAULT_RECONNECT_INTERVAL),
+    ClientKey = xylan_lib:make_key(proplists:get_value(client_key,Args)),
+    ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Args)),
+    Authtimeout = proplists:get_value(auth_timeout,Args),
     self() ! reconnect,
     {ok, #state{ id = ID, 
 		 server_ip = IP, 
@@ -174,9 +179,13 @@ handle_call(get_status, _From, State) ->
 	end,
     {reply, {ok, [{server_id, State#state.server_id} | Status]}, State};
 
+handle_call({config_change,_Changed,_New,_Removed},_From,S) ->
+    io:format("config_change changed=~p, new=~p, removed=~p\n",
+	      [_Changed,_New,_Removed]),
+    {reply, ok, S};
+
 handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+    {reply, {error,bad_call}, State}.
 
 %%--------------------------------------------------------------------
 %% @private

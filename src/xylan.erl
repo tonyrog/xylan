@@ -32,6 +32,7 @@
 
 start() ->
     lager:start(),
+    ssl:start(),
     application:start(xylan).
 
 status() ->
