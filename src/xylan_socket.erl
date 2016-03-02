@@ -96,7 +96,35 @@ connect(Host, Port, Opts) ->
 connect(Host, Port, Opts, Timeout) ->
     connect(Host, Port, [tcp], Opts, Timeout).
 
-connect(Host, Port, Protos=[tcp|_], Opts0, Timeout) ->
+connect(Host, File, Protos=[tcp|_], Opts0, Timeout)
+  when is_list(File) -> %% unix domain socket
+    Opts1 = proplists:expand([{binary, [{mode, binary}]},
+			      {list, [{mode, list}]}], Opts0),
+    {TcpOpts, Opts2} = split_options(tcp_connect_options(), Opts1),
+    Active = proplists:get_value(active, TcpOpts, false),
+    Mode   = proplists:get_value(mode, TcpOpts, list),
+    Packet = proplists:get_value(packet, TcpOpts, 0),
+    {_, TcpOpts1} = split_options([active,packet,mode], TcpOpts),
+    TcpConnectOpts = [{active,false},{packet,0},{mode,binary}|TcpOpts1],
+    case afunix:connect(File, TcpConnectOpts, Timeout) of
+	{ok, S} ->
+	    X = 
+		#xylan_socket { mdata   = afunix,
+				mctl    = afunix,
+				protocol = Protos,
+				transport = S,
+				socket   = S,
+				active   = Active,
+				mode     = Mode,
+				packet   = Packet,
+				opts     = Opts2,
+				tags     = {tcp,tcp_closed,tcp_error}
+			      },
+	    maybe_auth(connect_upgrade(X, tl(Protos), Timeout), client, Opts2);
+	Error ->
+	    Error
+    end;
+connect(Host, Port, Protos=[tcp|_], Opts0, Timeout) -> %% tcp socket
     Opts1 = proplists:expand([{binary, [{mode, binary}]},
 			      {list, [{mode, list}]}], Opts0),
     {TcpOpts, Opts2} = split_options(tcp_connect_options(), Opts1),

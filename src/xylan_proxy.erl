@@ -198,6 +198,7 @@ handle_cast(_Msg, State) ->
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_a,
       Socket =:= (State#state.a_sock)#xylan_socket.socket ->
+    lager:debug("data from A ~p", [Data]),
     if State#state.b_sock =:= undefined ->
 	    {ok,{LocalIP,LocalPort}} = xylan_socket:sockname(State#state.a_sock),
 	    {ok,{RemoteIP,RemotePort}} = xylan_socket:peername(State#state.a_sock),
@@ -216,8 +217,10 @@ handle_info({Tag,Socket,Data}, State) when
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_b,
       Socket =:= (State#state.b_sock)#xylan_socket.socket ->
+    lager:debug("data from B ~p", [Data]),
     xylan_socket:send(State#state.a_sock, Data),
     xylan_socket:setopts(State#state.b_sock, [{active,once}]),
+    lager:debug("data from B sent", []),
     {noreply, State};
 
 %% closed A side (user)
