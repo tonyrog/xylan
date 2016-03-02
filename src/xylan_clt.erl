@@ -33,9 +33,16 @@
 -export([config_change/3]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3]).
+-export([init/1, 
+	 handle_call/3, 
+	 handle_cast/2, 
+	 handle_info/2,
+	 terminate/2, 
+	 code_change/3]).
 
+%% test
+-export([dump/0]).
+ 
 -define(SERVER, ?MODULE).
 
 -define(DEFAULT_CNTL_PORT, 29390).   %% client proxy control port
@@ -98,6 +105,9 @@ get_status() ->
 config_change(Changed,New,Removed) ->
     gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
 
+dump() ->
+    gen_server:call(?SERVER, dump).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -120,9 +130,12 @@ init(Args0) ->
     IP = proplists:get_value(server_ip,Args,"127.0.0.1"),
     Port = proplists:get_value(server_port,Args,?DEFAULT_CNTL_PORT),
     Route = proplists:get_value(route,Args,[]),
-    PingInterval = proplists:get_value(ping_interval,Args,?DEFAULT_PING_INTERVAL),
-    PongTimeout = proplists:get_value(pong_timeout,Args,?DEFAULT_PONG_TIMEOUT),
-    ReconnectInterval = proplists:get_value(reconnect_interval,Args,?DEFAULT_RECONNECT_INTERVAL),
+    PingInterval = 
+	proplists:get_value(ping_interval,Args,?DEFAULT_PING_INTERVAL),
+    PongTimeout = 
+	proplists:get_value(pong_timeout,Args,?DEFAULT_PONG_TIMEOUT),
+    ReconnectInterval = 
+	proplists:get_value(reconnect_interval,Args,?DEFAULT_RECONNECT_INTERVAL),
     ClientKey = xylan_lib:make_key(proplists:get_value(client_key,Args)),
     ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Args)),
     Authtimeout = proplists:get_value(auth_timeout,Args),
@@ -184,6 +197,10 @@ handle_call({config_change,_Changed,_New,_Removed},_From,S) ->
 	      [_Changed,_New,_Removed]),
     {reply, ok, S};
 
+handle_call(dump,_From,S) ->
+    io:format("state=~p\n", [S]),
+    {reply, {ok,S}, S};
+
 handle_call(_Request, _From, State) ->
     {reply, {error,bad_call}, State}.
 
@@ -218,7 +235,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     xylan_socket:setopts(State#state.server_sock, [{active, once}]),
     try binary_to_term(Data, [safe]) of
-	_Mesg={auth_res,[{id,ServerID},{chal,Chal},{cred,Cred}]} -> %% auth and cred from server
+	_Mesg={auth_res,[{id,ServerID},{chal,Chal},{cred,Cred}]} -> 
+	    %% auth and cred from server
 	    lager:debug("auth_res: ~p ok", [_Mesg]),
 	    %% crypto:sha is used instead of crypto:hash R15!!
 	    case crypto:sha([State#state.server_key,State#state.server_chal]) of
@@ -227,7 +245,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 		    cancel_timer(State#state.auth_timer),
 		    %% crypto:sha is used instead of crypto:hash R15!!
 		    Cred1 = crypto:sha([State#state.client_key,Chal]),
-		    send(State#state.server_sock, {auth_ack,[{id,State#state.id},{cred,Cred1}]}),
+		    send(State#state.server_sock, 
+			 {auth_ack,[{id,State#state.id},{cred,Cred1}]}),
 		    PingTimer = start_timer(State#state.ping_interval,ping),
 		    {noreply, State#state { server_id = ServerID, 
 					    server_auth = true,
@@ -237,7 +256,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 		    lager:debug("credential failed"),
 		    close(State#state.server_sock),
 		    TRef = reconnect_after(State#state.reconnect_interval),
-		    {noreply, State#state { server_sock=undefined, server_auth=false,
+		    {noreply, State#state { server_sock=undefined, 
+					    server_auth=false,
 					    reconnect_timer=TRef }}
 	    end;
 	_Mesg ->
