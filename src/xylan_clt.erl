@@ -468,6 +468,8 @@ route([{R,L}|Rs], RouteInfo) ->
 		undefined ->
 		    lager:warning("route has not target port, ignored"),
 		    false;
+		Port when is_list(Port) ->
+		    {ok,{unix,Port}};
 		Port ->
 		    case proplists:get_value(ip,L,{127,0,0,1}) of
 			IP when is_tuple(IP) ->
@@ -532,6 +534,11 @@ match([M|_R], _RouteInfo) ->
 match([], _RouteInfo) ->
     true.
 
+match_data(String, ssl, R, RouteInfo) ->
+    case xylan_socket:request_type(String) of
+	ssl -> match(R, RouteInfo);
+	_ -> false
+    end;
 match_data(String, RE, R, RouteInfo) when is_integer(RE) -> 
     match_data(String, integer_to_list(RE), R, RouteInfo);
 match_data(String, RE, R, RouteInfo) ->	

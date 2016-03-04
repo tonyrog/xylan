@@ -37,6 +37,7 @@
 -export([stats/0, getstat/2]).
 -export([tags/1, socket/1]).
 -export([auth_incoming/2, authenticate/1]).
+-export([request_type/1]).
 
 -include("xylan_socket.hrl").
 
@@ -96,7 +97,7 @@ connect(Host, Port, Opts) ->
 connect(Host, Port, Opts, Timeout) ->
     connect(Host, Port, [tcp], Opts, Timeout).
 
-connect(Host, File, Protos=[tcp|_], Opts0, Timeout)
+connect(_Host, File, Protos=[tcp|_], Opts0, Timeout)
   when is_list(File) -> %% unix domain socket
     Opts1 = proplists:expand([{binary, [{mode, binary}]},
 			      {list, [{mode, list}]}], Opts0),
