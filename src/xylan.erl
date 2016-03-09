@@ -33,6 +33,7 @@
 start() ->
     lager:start(),
     ssl:start(),
+    application:start(afunix),
     application:start(xylan).
 
 status() ->
