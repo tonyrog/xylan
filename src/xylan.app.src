@@ -6,7 +6,8 @@
   {applications, [
                   kernel,
                   stdlib,
-		  ssl
+		  ssl,
+		  afunix
                  ]},
   {mod, { xylan_app, []}},
   {env, []}
