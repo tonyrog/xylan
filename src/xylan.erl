@@ -69,7 +69,7 @@ display_prop({K,V}) ->
 
 %% Generate a 64-bit random key used for signing packets
 generate_key() ->
-    <<X:64>> = crypto:rand_bytes(8),
+    <<X:64>> = crypto:strong_rand_bytes(8),
     X.
 
     

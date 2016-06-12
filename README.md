@@ -15,6 +15,7 @@ Example server config:
     {xylan, [
        {mode, server},
        {id, "server"},
+       %% Listen ports {interface-name,port} | {interface-ip,port} | port
        {port, [
          46122,                 %% default listen port 
          {"eth0",222},          %% listen port 222 bound to eth0
@@ -26,6 +27,9 @@ Example server config:
        {data_timeout, 5000},    %% user initial data timeout
        {clients, [
          {"home", [
+	   %% Keys may be generated with xylan:generate_key(), 
+	   %% if 64 bit big-endian integer is enough. 
+	   %% Otherwise any binary/io-list will do.
            {server_key,  3177648541185394227},  %% server is signing using this key
            {client_key,  12187761947737533676}, %% client is signing using this key
            {route, [
@@ -64,3 +68,33 @@ Client routing:  "home"
          { [{port,23},{src_ip,"216.58.209.132"}],  [{ip,"eth0"},{port,23}] }
        ]}
     ]}.
+
+Options available for determin the route / client
+
+    {data, RE}     Match initial data for match, as a special case
+                   if RE is 'ssl' then data is check for a SSL client 
+                   connect pattern.
+
+    {dst_ip, RE}   Match destination ip address, that is the server ip address
+                   of the xylan server. The RE may also be an IP tuple in 
+                   which case the destination IP is matched exactly
+
+    {dst_port, RE} Match destination port number with a regular expression
+                   or a port number.
+
+    {src_ip, RE}   Match source ip address, that is the clients ip address
+                   The RE may also be an IP tuple in which case the destination
+                   IP is matched exactly
+
+    {src_port, RE} Match destination port number with a regular expression
+                   or a port number.
+
+Client options for connecting a matching route
+
+    {port,Port}    Port number to connect to. if a list is given as Port number
+                   this is interpreted as a unix domain socket.
+
+    {ip, Name}     IP address to connect to, this default to {127,0,0,1}.
+                   Only ipv4 is supported right now. Name can also be an 
+		   interface name, in which case the interface address
+		   (ipv4) is used.

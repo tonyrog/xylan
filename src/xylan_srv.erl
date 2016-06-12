@@ -612,7 +612,7 @@ match([{dst_ip,RE}|R], RouteInfo) ->
 match([{dst_port,RE}|R], RouteInfo) ->
     case proplists:get_value(dst_port, RouteInfo) of
 	undefined -> false;
-	RE -> true;
+	RE -> match(R, RouteInfo);
 	Port when is_integer(Port) ->
 	    match_data(integer_to_list(Port), RE, R, RouteInfo);
 	Port when is_list(Port) ->  match_data(Port, RE, R, RouteInfo);
@@ -628,7 +628,7 @@ match([{src_ip,RE}|R], RouteInfo) ->
 match([{src_port,RE}|R], RouteInfo) ->
     case proplists:get_value(src_port, RouteInfo) of
 	undefined -> false;
-	RE -> true;
+	RE -> match(R, RouteInfo);
 	Port when is_integer(Port) ->
 	    match_data(integer_to_list(Port), RE, R, RouteInfo);
 	Port when is_list(Port) ->  match_data(Port, RE, R, RouteInfo);
@@ -640,11 +640,15 @@ match([M|_R], _RouteInfo) ->
 match([], _RouteInfo) ->
     true.
 
+match_data(String, ssl, R, RouteInfo) ->
+    case xylan_socket:request_type(String) of
+	ssl -> match(R, RouteInfo);
+	_ -> false
+    end;
 match_data(String, RE, R, RouteInfo) when is_integer(RE) -> 
-    match_data(String, integer_to_list(RE), R, RouteInfo);	     
+    match_data(String, integer_to_list(RE), R, RouteInfo);
 match_data(String, RE, R, RouteInfo) ->	
     case re:run(String,RE) of
 	{match,_} -> match(R, RouteInfo);
 	nomatch -> false
     end.
-	    

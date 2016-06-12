@@ -170,7 +170,8 @@ handle_cast({set_config,Conf}, State) ->
 handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
       State#state.client_auth =:= false ->
     lager:debug("auth_req: ~p", [_Req]),
-    Chal1 = crypto:rand_bytes(16),  %% generate challenge
+    Chal1 = crypto:strong_rand_bytes(16),  %% generate challenge
+    %% Chal1 = crypto:rand_bytes(16),  %% generate challenge
     %% crypto:sha is used instead of crypto:hash R15!!
     Cred = crypto:sha([State#state.server_key,Chal]), %% server cred
     send(State#state.socket, {auth_res,[{id,State#state.server_id},{chal,Chal1},{cred,Cred}]}),
