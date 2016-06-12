@@ -363,7 +363,8 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
 		    UsersSocks1 = [{UserSock,Ref1}|UserSocks],
 		    AuthOpts = [],  %% [delay_auth]
-		    SessionKey = crypto:rand_bytes(16),
+		    %% SessionKey = crypto:rand_bytes(16),
+		    SessionKey = crypto:strong_rand_bytes(16),
 		    case xylan_socket:async_socket(UserSock,Socket,AuthOpts) of
 			{ok, XSocket} ->
 			    case xylan_proxy:start(SessionKey) of

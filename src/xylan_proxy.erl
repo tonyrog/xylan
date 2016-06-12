@@ -194,12 +194,12 @@ handle_cast(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 
-%% data from A (user) before proxy is connected
+%% data from A (user)
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_a,
       Socket =:= (State#state.a_sock)#xylan_socket.socket ->
     lager:debug("data from A ~p", [Data]),
-    if State#state.b_sock =:= undefined ->
+    if State#state.b_sock =:= undefined -> %% before proxy is connected
 	    {ok,{LocalIP,LocalPort}} = xylan_socket:sockname(State#state.a_sock),
 	    {ok,{RemoteIP,RemotePort}} = xylan_socket:peername(State#state.a_sock),
 	    RouteInfo = [{dst_ip,inet:ntoa(LocalIP)},{dst_port,LocalPort},

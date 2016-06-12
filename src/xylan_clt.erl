@@ -412,9 +412,10 @@ connect_server(State) ->
 			      [{mode,binary},{packet,4},{nodelay,true}],
 			      3000) of
 	{ok, Socket} ->
-	    lager:debug("server ~p:~p connected", 
-		   [State#state.server_ip,State#state.server_port]),
-	    Chal = crypto:rand_bytes(16),
+	    lager:debug("server ~p:~p connected",
+			[State#state.server_ip,State#state.server_port]),
+	    %% Chal = crypto:rand_bytes(16),
+	    Chal = crypto:strong_rand_bytes(16),  %% generate challenge
 	    send(Socket, {auth_req,[{id,State#state.id},{chal,Chal}]}),
 	    xylan_socket:setopts(Socket, [{active, once}]),
 	    Timer = start_timer(State#state.auth_timeout, auth_timeout),
