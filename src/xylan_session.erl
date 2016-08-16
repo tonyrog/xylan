@@ -1,6 +1,7 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2007 - 2014, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2007 - 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -16,11 +17,12 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2014, Tony Rogvall
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
-%%%    Proxy server session hold the connection to the "client" proxy
+%%%    Proxy server session, holds the connection to the "client" proxy
+%%%
+%%% Created : 18 Dec 2014 by Tony Rogvall
 %%% @end
-%%% Created : 18 Dec 2014 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
 -module(xylan_session).
 
@@ -32,6 +34,9 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
+
+%% test
+-export([dump/0]).
 
 -type timer() :: reference().
 
@@ -72,6 +77,8 @@
 start() ->
     gen_server:start(?MODULE, [self()], []).
 
+dump() ->
+    gen_server:call(?MODULE, dump).
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -127,8 +134,12 @@ handle_call(get_status, _From, State) ->
 	end,
     {reply, {ok, [{id,State#state.client_id} | Status]}, State};
 
+handle_call(dump, _From, State) ->
+    io:format("State:\n~p\n",[State]),
+    {reply, ok, State};
+
 handle_call(_Request, _From, State) ->
-    lager:warning("~s:handle_call: got ~p\n", [_Request]),
+    lager:warning("got unknown request ~p\n", [_Request]),
     Reply = {error,einval},
     {reply, Reply, State}.
 
@@ -151,22 +162,25 @@ handle_cast({set_socket, Socket}, State) ->
 			     auth_timer=Timer,
 			     session_time = os:timestamp(),
 			     tag=T,tag_closed=C,tag_error=E }};
+
 handle_cast({set_config,Conf}, State) ->
     State1 =
 	lists:foldl(
-	  fun({client_id,ID}, S)   -> S#state { client_id = ID };
-	     ({server_id,ID}, S)   -> S#state { server_id = ID };
-	     ({client_key,Key}, S) -> S#state { client_key = Key };
-	     ({server_key,Key}, S) -> S#state { server_key = Key };
-	     ({auth_timeout,T}, S) -> S#state { auth_timeout = T };
-	     ({ping_timeout,T}, S) -> S#state { ping_timeout = T };
+	  fun({client_id,ID}, S)     -> S#state { client_id = ID };
+	     ({server_id,ID}, S)     -> S#state { server_id = ID };
+	     ({client_key,Key}, S)   -> S#state { client_key = Key };
+	     ({server_key,Key}, S)   -> S#state { server_key = Key };
+	     ({auth_timeout,T}, S)   -> S#state { auth_timeout = T };
+	     ({ping_timeout,T}, S)   -> S#state { ping_timeout = T };
 	     (Item, S) ->
-		  lager:warning("bad config itmer ~p", [Item]),
+		  lager:warning("bad config item ~p", [Item]),
 		  S
 	  end, State, Conf),
     lager:debug("set_config ~p", [State1]),
     {noreply, State1};
-%% server has set config and accepted the challange go on and issue the challenge
+
+%% server has set config and accepted the challenge
+%% go on and issue the challenge
 handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
       State#state.client_auth =:= false ->
     lager:debug("auth_req: ~p", [_Req]),
@@ -174,15 +188,18 @@ handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
     %% Chal1 = crypto:rand_bytes(16),  %% generate challenge
     %% crypto:sha is used instead of crypto:hash R15!!
     Cred = crypto:sha([State#state.server_key,Chal]), %% server cred
-    send(State#state.socket, {auth_res,[{id,State#state.server_id},{chal,Chal1},{cred,Cred}]}),
+    send(State#state.socket, {auth_res,[{id,State#state.server_id},
+					{chal,Chal1},{cred,Cred}]}),
     lager:info("client ~p reply and challenge sent", [State#state.client_id]),
     {noreply, State#state { client_chal = Chal1 }};
+
 handle_cast(Route={route,_DataPort,_SessionKey,_RouteInfo}, State) when
       State#state.client_auth =:= true ->
     send(State#state.socket,Route),
     {noreply, State};
+
 handle_cast(_Msg, State) ->
-    lager:debug("got ~p (client_auth=~p, socket=~p\n", 
+    lager:debug("got unknown msg ~p (client_auth=~p, socket=~p\n",
 	   [_Msg,State#state.client_auth, State#state.socket]),
     {noreply, State}.
 

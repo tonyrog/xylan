@@ -1,6 +1,7 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2007 - 2014, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2007 - 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -15,11 +16,12 @@
 %%%
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2015, Tony Rogvall
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
 %%%    xylan sockets
+%%%
+%%% Created : 17 Jan 2015 by Tony Rogvall
 %%% @end
-%%% Created : 17 Jan 2015 by Tony Rogvall <tony@rogvall.se>
 
 -module(xylan_socket).
 
@@ -138,15 +140,15 @@ connect(Host, Port, Protos=[tcp|_], Opts0, Timeout) -> %% tcp socket
 	{ok, S} ->
 	    X = 
 		#xylan_socket { mdata   = gen_tcp,
-			      mctl    = inet,
-			      protocol = Protos,
-			      transport = S,
-			      socket   = S,
-			      active   = Active,
-			      mode     = Mode,
-			      packet   = Packet,
-			      opts     = Opts2,
-			      tags     = {tcp,tcp_closed,tcp_error}
+				mctl    = inet,
+				protocol = Protos,
+				transport = S,
+				socket   = S,
+				active   = Active,
+				mode     = Mode,
+				packet   = Packet,
+				opts     = Opts2,
+				tags     = {tcp,tcp_closed,tcp_error}
 			    },
 	    maybe_auth(connect_upgrade(X, tl(Protos), Timeout), client, Opts2);
 	Error ->
@@ -249,10 +251,10 @@ connect_upgrade(X, Protos0, Timeout) ->
 		    lager:debug("ssl:connect opt=~w\n", 
 			 [ssl:getopts(S1, [active,packet,mode])]),
 		    X1 = X#xylan_socket { socket=S1,
-					mdata = ssl,
-					mctl  = ssl,
-					opts=Opts1,
-					tags={ssl,ssl_closed,ssl_error}},
+					  mdata = ssl,
+					  mctl  = ssl,
+					  opts=Opts1,
+					  tags={ssl,ssl_closed,ssl_error}},
 		    connect_upgrade(X1, Protos1, Timeout);
 		Error={error,_Reason} ->
 		    lager:warning("ssl:connect error=~w\n", [_Reason]),
@@ -261,7 +263,7 @@ connect_upgrade(X, Protos0, Timeout) ->
 	[http|Protos1] ->
 	    {_, Close,Error} = X#xylan_socket.tags,
 	    X1 = X#xylan_socket { packet = http, 
-				tags = {http, Close, Error }},
+				  tags = {http, Close, Error }},
 	    connect_upgrade(X1, Protos1, Timeout);
 	[] ->
 	    setopts(X, [{mode,X#xylan_socket.mode},
@@ -310,7 +312,7 @@ async_socket(Listen, Socket, AuthOpts)
     Inherit = [nodelay,keepalive,delay_send,priority,tos],
     case getopts(Listen, Inherit) of
         {ok, Opts} ->  %% transfer listen options
-	    %% FIXME: here inet is assume, and currentl the only option
+	    %% FIXME: here inet is assumed and currently the only option
 	    case inet:setopts(Socket, Opts) of
 		ok ->
 		    {ok,Mod} = inet_db:lookup_socket(Listen#xylan_socket.socket),

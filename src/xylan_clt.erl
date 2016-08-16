@@ -1,6 +1,7 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2007 - 2014, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2007 - 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -16,11 +17,12 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2014, Tony Rogvall
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
-%%%    Proxy wedding client,
+%%%    Proxy wedding client
+%%%
+%%% Created : 18 Dec 2014 by Tony Rogvall
 %%% @end
-%%% Created : 18 Dec 2014 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
 -module(xylan_clt).
 
@@ -42,6 +44,7 @@
 
 %% test
 -export([dump/0]).
+-export([socket/0]).
  
 -define(SERVER, ?MODULE).
 
@@ -79,6 +82,7 @@
 	  ping_timer :: reference(), %% when to send next ping, control channel
 	  pong_timer :: reference(),   %% wdt timer for pong
 	  pong_time :: erlang:timestamp(),  %% last pong time
+	  socket_options = [] ::list(), %% from config-file
 	  route = []
 	}).
 
@@ -107,6 +111,9 @@ config_change(Changed,New,Removed) ->
 
 dump() ->
     gen_server:call(?SERVER, dump).
+
+socket() ->
+    gen_server:call(?SERVER, socket).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -139,6 +146,9 @@ init(Args0) ->
     ClientKey = xylan_lib:make_key(proplists:get_value(client_key,Args)),
     ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Args)),
     Authtimeout = proplists:get_value(auth_timeout,Args),
+    SocketOpts =
+	xylan_lib:check_options(client,
+				proplists:get_value(socket_options,Args,[])),
     self() ! reconnect,
     {ok, #state{ id = ID, 
 		 server_ip = IP, 
@@ -149,7 +159,8 @@ init(Args0) ->
 		 ping_interval = PingInterval,
 		 pong_timeout = PongTimeout,
 		 reconnect_interval = ReconnectInterval,
-		 auth_timeout = Authtimeout
+		 auth_timeout = Authtimeout,
+		 socket_options = SocketOpts
 	       }}.
 
 %%--------------------------------------------------------------------
@@ -192,14 +203,20 @@ handle_call(get_status, _From, State) ->
 	end,
     {reply, {ok, [{server_id, State#state.server_id} | Status]}, State};
 
-handle_call({config_change,_Changed,_New,_Removed},_From,S) ->
+handle_call({config_change,_Changed,_New,_Removed},_From,State) ->
     io:format("config_change changed=~p, new=~p, removed=~p\n",
 	      [_Changed,_New,_Removed]),
-    {reply, ok, S};
+    {reply, ok, State};
 
-handle_call(dump,_From,S) ->
-    io:format("state=~p\n", [S]),
-    {reply, {ok,S}, S};
+handle_call(dump,_From,State) ->
+    io:format("state=~p\n", [State]),
+    {reply, ok, State};
+
+handle_call(socket,_From,State) when State#state.server_sock =/= undefined ->
+    {reply, (State#state.server_sock)#xylan_socket.socket, State};
+
+handle_call(socket,_From,State)  ->
+    {reply, undefined, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error,bad_call}, State}.
@@ -298,9 +315,11 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 				[LocalIP,LocalPort]),
 		    case xylan_proxy:start(SessionKey) of
 			{ok,Pid} ->
-			    gen_server:cast(Pid,{connect,
-						 LocalIP,LocalPort,
-						 RemoteIP,DataPort})
+			    gen_server:cast(
+			      Pid,
+			      {connect,
+			       LocalIP,LocalPort,State#state.socket_options,
+			       RemoteIP,DataPort,[]})
 		    end,
 		    {noreply, State};
 		false ->

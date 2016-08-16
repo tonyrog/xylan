@@ -1,6 +1,7 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2007 - 2014, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2007 - 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -16,17 +17,20 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2014, Tony Rogvall
+%%% @author Marina Westman Lonne <malotte@malotte.net>
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
 %%%    Utility functions
+%%%
+%%% Created : 18 Dec 2014 by Tony Rogvall 
 %%% @end
-%%% Created : 18 Dec 2014 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
 -module(xylan_lib).
 
 -export([make_key/1]).
 -export([lookup_ip/2]).
 -export([lookup_ifaddr/2]).
+-export([check_options/2]).
 
 make_key(Key) when is_binary(Key) ->  Key;
 make_key(Key) when is_integer(Key) -> <<Key:64>>;
@@ -57,3 +61,33 @@ get_family_addr([IP|_IPs], inet) when tuple_size(IP) =:= 4 -> {ok,IP};
 get_family_addr([IP|_IPs], inet6) when tuple_size(IP) =:= 8 -> {ok,IP};
 get_family_addr([_|IPs],Family) -> get_family_addr(IPs,Family);
 get_family_addr([],_Family) -> {error, enoent}.
+
+
+-spec check_options(client | server,
+		    Options::list({Key::atom, Value::term()})) ->
+			   OkOptions::list({Key::atom, Value::term()}).
+
+check_options(_Tag, []) ->
+    [];
+check_options(Tag, Options) ->
+    check_options(Tag, Options, []).
+
+check_options(_Tag, [], Acc) ->
+    Acc;
+check_options(Tag, [{active, once} | Rest], Acc) ->
+    check_options(Tag, Rest, Acc);
+check_options(Tag, [{active, Value} | Rest], Acc) when Value =:= once->
+    lager:warning("active value ~p will be ignored", [Value]),
+    check_options(Tag, Rest, Acc);
+check_options(Tag, [{mode, _Value} | Rest], Acc) ->
+    lager:warning("mode value ~p will be ignored", [_Value]),
+    check_options(Tag, Rest, Acc);
+check_options(Tag, [{packet, _Value} | Rest], Acc) ->
+    lager:warning("packet value ~p will be ignored", [_Value]),
+    check_options(Tag, Rest, Acc);
+check_options(Tag, [{nodelay, _Value} | Rest], Acc) ->
+    lager:warning("nodelay value ~p will be ignored", [_Value]),
+    check_options(Tag, Rest, Acc);
+check_options(Tag, [Option | Rest], Acc) ->
+    %% What else should be checked??
+    check_options(Tag, Rest, [Option | Acc]).
