@@ -30,7 +30,7 @@
 -export([make_key/1]).
 -export([lookup_ip/2]).
 -export([lookup_ifaddr/2]).
--export([check_options/2]).
+-export([filter_options/2]).
 
 make_key(Key) when is_binary(Key) ->  Key;
 make_key(Key) when is_integer(Key) -> <<Key:64>>;
@@ -63,31 +63,31 @@ get_family_addr([_|IPs],Family) -> get_family_addr(IPs,Family);
 get_family_addr([],_Family) -> {error, enoent}.
 
 
--spec check_options(client | server,
+-spec filter_options(client | server,
 		    Options::list({Key::atom, Value::term()})) ->
 			   OkOptions::list({Key::atom, Value::term()}).
 
-check_options(_Tag, []) ->
+filter_options(_Tag, []) ->
     [];
-check_options(Tag, Options) ->
-    check_options(Tag, Options, []).
+filter_options(Tag, Options) ->
+    filter_options(Tag, Options, []).
 
-check_options(_Tag, [], Acc) ->
+filter_options(_Tag, [], Acc) ->
     Acc;
-check_options(Tag, [{active, once} | Rest], Acc) ->
-    check_options(Tag, Rest, Acc);
-check_options(Tag, [{active, Value} | Rest], Acc) when Value =:= once->
+filter_options(Tag, [{active, once} | Rest], Acc) ->
+    filter_options(Tag, Rest, Acc);
+filter_options(Tag, [{active, Value} | Rest], Acc) when Value =:= once->
     lager:warning("active value ~p will be ignored", [Value]),
-    check_options(Tag, Rest, Acc);
-check_options(Tag, [{mode, _Value} | Rest], Acc) ->
+    filter_options(Tag, Rest, Acc);
+filter_options(Tag, [{mode, _Value} | Rest], Acc) ->
     lager:warning("mode value ~p will be ignored", [_Value]),
-    check_options(Tag, Rest, Acc);
-check_options(Tag, [{packet, _Value} | Rest], Acc) ->
+    filter_options(Tag, Rest, Acc);
+filter_options(Tag, [{packet, _Value} | Rest], Acc) ->
     lager:warning("packet value ~p will be ignored", [_Value]),
-    check_options(Tag, Rest, Acc);
-check_options(Tag, [{nodelay, _Value} | Rest], Acc) ->
+    filter_options(Tag, Rest, Acc);
+filter_options(Tag, [{nodelay, _Value} | Rest], Acc) ->
     lager:warning("nodelay value ~p will be ignored", [_Value]),
-    check_options(Tag, Rest, Acc);
-check_options(Tag, [Option | Rest], Acc) ->
+    filter_options(Tag, Rest, Acc);
+filter_options(Tag, [Option | Rest], Acc) ->
     %% What else should be checked??
-    check_options(Tag, Rest, [Option | Acc]).
+    filter_options(Tag, Rest, [Option | Acc]).

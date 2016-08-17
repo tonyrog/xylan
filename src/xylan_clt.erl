@@ -147,8 +147,8 @@ init(Args0) ->
     ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Args)),
     Authtimeout = proplists:get_value(auth_timeout,Args),
     SocketOpts =
-	xylan_lib:check_options(client,
-				proplists:get_value(socket_options,Args,[])),
+	xylan_lib:filter_options(client,
+				 proplists:get_value(socket_options,Args,[])),
     self() ! reconnect,
     {ok, #state{ id = ID, 
 		 server_ip = IP, 
@@ -319,7 +319,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 			      Pid,
 			      {connect,
 			       LocalIP,LocalPort,State#state.socket_options,
-			       RemoteIP,DataPort,[]})
+			       RemoteIP,DataPort,State#state.socket_options})
 		    end,
 		    {noreply, State};
 		false ->
