@@ -46,6 +46,7 @@ Example server config:
            {server_key, <<1,2,3,4,5,6,7,8>>},  %% server is signing using this key
            {client_key, "hello"},              %% client is signing using this key
 	   {user_socket_options, [{sndbuf, 8192}]},
+
            {route, [
     	     [{ip,"eth0"},{port,222},{data, "SSH-2.0.*"}],
            ]}
