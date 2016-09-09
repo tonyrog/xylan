@@ -1,6 +1,7 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2007 - 2014, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2007 - 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -16,11 +17,12 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2014, Tony Rogvall
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
-%%%    Proxy server session hold the connection to the "user"
+%%%    Proxy server session, holds the connection to the "user"
+%%%
+%%% Created : 18 Dec 2014 by Tony Rogvall
 %%% @end
-%%% Created : 18 Dec 2014 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
 -module(xylan_proxy).
 
@@ -45,8 +47,10 @@
 	  initial :: binary(),     %% first binary "packet"
 	  a_sock :: xylan_socket(),  %% user socket
 	  a_closed = false :: boolean(),
+	  a_socket_options = [] ::list(),
 	  b_sock :: xylan_socket(),  %% client socket (when connected)
 	  b_closed = false :: boolean(),
+	  b_socket_options = [] ::list(),
 	  b_timer :: reference()     %% while wait for b side to connect
 	 }).
 
@@ -127,14 +131,16 @@ handle_cast({set_a,Socket}, State) ->
 handle_cast({set_b,Socket}, State) ->
     lager:debug("set_b, send ~p",[State#state.initial]),
     {T,C,E} = xylan_socket:tags(Socket),
-    xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
+    xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}] ++
+			     State#state.b_socket_options),
     if State#state.initial =:= undefined ->
 	    %% allow b side to be connected without require the initial
 	    %% packet. This is/should be configured.
 	    ok;
        true ->
 	    %% reactiveate the a side
-	    xylan_socket:setopts(State#state.a_sock, [{active,once}]),
+	    xylan_socket:setopts(State#state.a_sock, [{active,once}] ++
+				     State#state.a_socket_options),
 	    %% this will kick the activity
 	    xylan_socket:send(Socket, State#state.initial)
     end,
@@ -144,16 +150,31 @@ handle_cast({set_b,Socket}, State) ->
 			    b_timer = undefined,
 			    tag_b=T, tag_b_closed=C, tag_b_error=E}};
 
-handle_cast({connect,LIP,LPort,RIP,RPort}, State) ->
-    LOptions = [{mode,binary},{packet,0},{nodelay,true}],
+handle_cast({socket_options, ASockOpts, BSockOpts}, State) ->
+    lager:debug("a-options ~p\nb-options ~p", [ASockOpts, BSockOpts]),
+    if State#state.a_sock =/= undefined ->
+	    xylan_socket:setopts(State#state.a_sock, ASockOpts);
+       true -> do_nothing
+    end,
+    if State#state.b_sock =/= undefined ->
+	    xylan_socket:setopts(State#state.b_sock, BSockOpts);
+       true -> do_nothing
+    end,
+    {noreply, State#state { a_socket_options = ASockOpts,
+			    b_socket_options = BSockOpts}};
+
+handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
+    LOptions = [{mode,binary},{packet,0},{nodelay,true}] ++ LOpts,
     lager:debug("connect: ~p:~w <-> ~p:~w",[LIP,LPort,RIP,RPort]),
     case xylan_socket:connect(LIP,LPort,LOptions,3000) of
 	{ok,A} ->
 	    lager:debug("A is connected"),
-	    ROptions = [{mode,binary},{packet,4},{nodelay,true}],
+	    ROptions = [{mode,binary},{packet,4},{nodelay,true}] ++ ROpts,
 	    case xylan_socket:connect(RIP,RPort,ROptions,3000) of
 		{ok,B} ->
 		    lager:debug("B is connected"),
+		    lager:debug("socket options: A:~w <-> B:~w",
+				[LOptions, ROptions]),
 		    %% FIXME make better and signed!
 		    xylan_socket:send(B, State#state.session_key),
 		    xylan_socket:setopts(B,[{packet,0},{active,once}]),
@@ -205,7 +226,8 @@ handle_info({Tag,Socket,Data}, State) when
 	    RouteInfo = [{dst_ip,inet:ntoa(LocalIP)},{dst_port,LocalPort},
 			 {src_ip,inet:ntoa(RemoteIP)},{src_port,RemotePort},
 			 {data,Data}],
-	    gen_server:cast(State#state.parent, {route,State#state.session_key,RouteInfo}),
+	    gen_server:cast(State#state.parent,
+			    {route,State#state.session_key,RouteInfo, self()}),
 	    Btimer = erlang:start_timer(?B_CONNECT_TMO, self(), b_timer),
 	    {noreply, State#state { initial = Data, b_timer = Btimer }};
        true ->

@@ -1,6 +1,7 @@
+%%% coding: latin-1
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2007 - 2014, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2007 - 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -16,13 +17,14 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2014, Tony Rogvall
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
 %%%    Proxy wedding server, accept "clients" proxies to register a session
 %%%    to act as the real servers. Users connect and rules determine where
 %%%    the connection will be sent.
+%%%
+%%% Created : 18 Dec 2014 by Tony Rogvall
 %%% @end
-%%% Created : 18 Dec 2014 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
 -module(xylan_srv).
 
@@ -37,6 +39,9 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
+
+%% test
+-export([dump/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -75,8 +80,10 @@
 	  client_key :: binary(),    %% client side key
 	  auth_timeout :: timeout(), %% authentication timeout value
 	  ping_timeout :: timeout(), %% ping not received timeout value
-	  pid :: pid(),             %% client process
-	  mon :: reference(),       %% monitor of above
+	  a_socket_options :: list(),  %%
+	  b_socket_options :: list(),  %%
+	  pid :: pid(),              %% client process
+	  mon :: reference(),        %% monitor of above
 	  route :: [[route_config()]]  %% config
 	}).
 	  
@@ -137,6 +144,9 @@ get_status() ->
 config_change(Changed,New,Removed) ->
     gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
     
+dump() ->
+    gen_server:call(?MODULE, dump).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -160,30 +170,38 @@ init(Args0) ->
     ServerID = proplists:get_value(id,Args,""),
     AuthTimeout = proplists:get_value(auth_timeout,Args,?DEFAULT_AUTH_TIMEOUT),
     PingTimeout = proplists:get_value(ping_timeout,Args,?DEFAULT_PING_TIMEOUT),
-    Clients = [begin
-		   SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
-		   CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
-		   %% CPingTimeout = proplists:get_value(ping_timeout,ClientConf,PingTimeout),
-		   Route = proplists:get_value(route, ClientConf),
-		   {ok,CPid} = xylan_session:start(),
-		   CMon = erlang:monitor(process, CPid),
-		   Config = [{client_id,ClientID},
-			     {server_id,ServerID},
-			     {server_key,SKey},
-			     {client_key,CKey},
-			     {auth_timeout,AuthTimeout},
-			     {ping_timeout,PingTimeout}
-			    ],
-		   gen_server:cast(CPid, {set_config,Config}),
-		   #client { id = ClientID,
-			     server_key = SKey,
-			     client_key = CKey,
-			     auth_timeout = AuthTimeout,
-			     ping_timeout = PingTimeout,
-			     pid = CPid,
-			     mon = CMon,
-			     route = Route }
-	       end || {ClientID,ClientConf} <- proplists:get_value(clients, Args, [])],
+    ASocketOpts = xylan_lib:filter_options(server,proplists:get_value(user_socket_options,Args,[])),
+    BSocketOpts = xylan_lib:filter_options(server,proplists:get_value(client_socket_options,Args,[])),
+    
+    Clients =
+	[begin
+	     SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
+	     CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
+	     %% CPingTimeout = proplists:get_value(ping_timeout,ClientConf,PingTimeout),
+	     Route = proplists:get_value(route, ClientConf),
+	     ASocketOpts1=xylan_lib:merge_filter_options(ASocketOpts,xylan_lib:filter_options(server,proplists:get_value(user_socket_options,ClientConf,[]))),
+	     BSocketOpts1=xylan_lib:merge_filter_options(BSocketOpts,xylan_lib:filter_options(server,proplists:get_value(client_socket_options,ClientConf,[]))),
+	     {ok,CPid} = xylan_session:start(),
+	     CMon = erlang:monitor(process, CPid),
+	     Config = [{client_id,ClientID},
+		       {server_id,ServerID},
+		       {server_key,SKey},
+		       {client_key,CKey},
+		       {auth_timeout,AuthTimeout},
+		       {ping_timeout,PingTimeout}
+		      ],
+	     gen_server:cast(CPid, {set_config,Config}),
+	     #client { id = ClientID,
+		       server_key = SKey,
+		       client_key = CKey,
+		       auth_timeout = AuthTimeout,
+		       ping_timeout = PingTimeout,
+		       a_socket_options = ASocketOpts1,
+		       b_socket_options = BSocketOpts1,
+		       pid = CPid,
+		       mon = CMon,
+		       route = Route }
+	 end || {ClientID,ClientConf} <- proplists:get_value(clients,Args,[])],
     {ok,CntlSock} = start_client_cntl(CntlPort),
     {ok,DataSock} = start_client_data(DataPort),
     UserSocks = start_user(UserPorts),
@@ -203,15 +221,15 @@ init(Args0) ->
 
 start_client_cntl(Port) ->
     xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
-				    {nodelay, true},
-				    {mode,binary},
-				    {packet,4}]).
+				      {nodelay, true},
+				      {mode,binary},
+				      {packet,4}]).
 
 start_client_data(Port) ->
     xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
-				    {nodelay, true},
-				    {mode,binary},
-				    {packet,4}]).
+				      {nodelay, true},
+				      {mode,binary},
+				      {packet,4}]).
 
 start_user(Ports) when is_list(Ports) ->
     lists:foldl(
@@ -233,10 +251,10 @@ start_user(Port) ->
 
 open_user_port(Port,IP) when is_integer(Port) ->
     case xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
-					 {nodelay, true},
-					 {mode,binary},
-					 {ifaddr,IP},
-					 {packet,0}]) of
+					   {nodelay, true},
+					   {mode,binary},
+					   {ifaddr,IP},
+					   {packet,0}]) of
 	{ok,Socket} ->
 	    {ok,Ref} = xylan_socket:async_accept(Socket),
 	    [{Socket,Ref}];
@@ -264,12 +282,17 @@ handle_call(get_clients, _From, State) ->
     Clients = [{C#client.id, C#client.pid} || C <- State#state.clients],
     {reply, {ok,Clients}, State};
 
-handle_call({config_change,_Changed,_New,_Removed},_From,S) ->
+handle_call({config_change,_Changed,_New,_Removed},_From,State) ->
     io:format("config_change changed=~p, new=~p, removed=~p\n",
 	      [_Changed,_New,_Removed]),
-    {reply, ok, S};
+    {reply, ok, State};
     
+handle_call(dump, _From, State) ->
+    io:format("State:\n~p\n",[State]),
+    {reply, ok, State};
+
 handle_call(_Request, _From, State) ->
+    lager:warning("got unknown request ~p\n", [_Request]),
     {reply, {error, bad_call}, State}.
 
 %%--------------------------------------------------------------------
@@ -283,7 +306,7 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 
-handle_cast(Msg={route,SessionKey,RouteInfo}, State) ->
+handle_cast(Msg={route,SessionKey,RouteInfo,Proxy}, State) ->
     %% user session got some data, try to route to a client
     %% by some rule, current rule is to take first client
     %% fixme: verify user ?  yes!
@@ -295,12 +318,18 @@ handle_cast(Msg={route,SessionKey,RouteInfo}, State) ->
 	{ok,Client} when is_pid(Client#client.pid) ->
 	    gen_server:cast(Client#client.pid,
 			    {route,State#state.data_port,SessionKey,RouteInfo}),
+	    %% Set options now when we have identified the client
+	    gen_server:cast(Proxy,
+			    {socket_options,
+			     Client#client.a_socket_options,
+			     Client#client.b_socket_options}),
 	    {noreply, State};
 	{ok,Client} ->
 	    lager:warning("client ~s not connected",[Client#client.id]),
 	    {noreply, State}
     end;
 handle_cast(_Msg, State) ->
+    lager:warning("got unknown message ~p\n", [_Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -315,7 +344,7 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 
 
-%% accept Incoming user socket
+%% accept incoming socket requests
 handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
     if
 	Listen =:= (State#state.cntl_sock)#xylan_socket.socket, Ref =:= State#state.cntl_ref ->
@@ -505,7 +534,7 @@ handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) ->
 	    end
     end;
 handle_info(_Info, State) ->
-    lager:warning("got: ~p\n", [_Info]),
+    lager:warning("got unknown info ~p\n", [_Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
