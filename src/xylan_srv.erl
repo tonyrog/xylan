@@ -321,8 +321,7 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	Listen =:= (State#state.cntl_sock)#xylan_socket.socket, Ref =:= State#state.cntl_ref ->
 	    lager:debug("(client control) ~p", [_Msg]),
 	    {ok,Ref1} = xylan_socket:async_accept(State#state.cntl_sock),
-	    AuthOpts = [],  %% [delay_auth]
-	    case xylan_socket:async_socket(State#state.cntl_sock, Socket, AuthOpts) of
+	    case xylan_socket:async_socket(State#state.cntl_sock, Socket) of
 		{ok, XSocket} ->
 		    {ok,{SrcIP,SrcPort}} = xylan_socket:peername(XSocket),
 		    lager:info("client connected from ~p:~p\n", 
@@ -339,8 +338,7 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	Listen =:= (State#state.data_sock)#xylan_socket.socket, Ref =:= State#state.data_ref ->
 	    lager:debug("(client data) ~p", [_Msg]),
 	    {ok,Ref1} = xylan_socket:async_accept(State#state.data_sock),
-	    AuthOpts = [],  %% [delay_auth]
-	    case xylan_socket:async_socket(State#state.data_sock, Socket, AuthOpts) of
+	    case xylan_socket:async_socket(State#state.data_sock, Socket) of
 		{ok, XSocket} ->
 		    %% FIXME: add options that allow some ports to be SERVER INITIATE ports!!!
 		    %% wait for first packet should contain the correct SessionKey!
@@ -362,10 +360,8 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		{value,{UserSock,Ref},UserSocks} ->
 		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
 		    UsersSocks1 = [{UserSock,Ref1}|UserSocks],
-		    AuthOpts = [],  %% [delay_auth]
-		    %% SessionKey = crypto:rand_bytes(16),
 		    SessionKey = crypto:strong_rand_bytes(16),
-		    case xylan_socket:async_socket(UserSock,Socket,AuthOpts) of
+		    case xylan_socket:async_socket(UserSock,Socket) of
 			{ok, XSocket} ->
 			    case xylan_proxy:start(SessionKey) of
 				{ok, Pid} ->
