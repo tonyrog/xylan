@@ -31,6 +31,7 @@
 -export([lookup_ip/2]).
 -export([lookup_ifaddr/2]).
 -export([filter_options/2]).
+-export([merge_options/2]).
 
 make_key(Key) when is_binary(Key) ->  Key;
 make_key(Key) when is_integer(Key) -> <<Key:64>>;
@@ -63,31 +64,41 @@ get_family_addr([_|IPs],Family) -> get_family_addr(IPs,Family);
 get_family_addr([],_Family) -> {error, enoent}.
 
 
--spec filter_options(client | server,
-		    Options::list({Key::atom, Value::term()})) ->
-			   OkOptions::list({Key::atom, Value::term()}).
+-type option() :: Key::atom() |
+		 {Key::atom(), Value::term()} |
+		 {Key::atom(), Value1::term(), Value2::term(), Value3::term()}.
 
-filter_options(_Tag, []) ->
-    [];
+-spec filter_options(client | server, Options::list(option())) ->
+			    OkOptions::list(option()).
+%% Note: KeyValue may contain the raw option and that 
 filter_options(Tag, Options) ->
-    filter_options(Tag, Options, []).
+    filter_options_(Tag, Options, [packet,mode,active,
+				   header,exit_on_close,raw]).
 
-filter_options(_Tag, [], Acc) ->
-    Acc;
-filter_options(Tag, [{active, once} | Rest], Acc) ->
-    filter_options(Tag, Rest, Acc);
-filter_options(Tag, [{active, Value} | Rest], Acc) when Value =:= once->
-    lager:warning("active value ~p will be ignored", [Value]),
-    filter_options(Tag, Rest, Acc);
-filter_options(Tag, [{mode, _Value} | Rest], Acc) ->
-    lager:warning("mode value ~p will be ignored", [_Value]),
-    filter_options(Tag, Rest, Acc);
-filter_options(Tag, [{packet, _Value} | Rest], Acc) ->
-    lager:warning("packet value ~p will be ignored", [_Value]),
-    filter_options(Tag, Rest, Acc);
-filter_options(Tag, [{nodelay, _Value} | Rest], Acc) ->
-    lager:warning("nodelay value ~p will be ignored", [_Value]),
-    filter_options(Tag, Rest, Acc);
-filter_options(Tag, [Option | Rest], Acc) ->
-    %% What else should be checked??
-    filter_options(Tag, Rest, [Option | Acc]).
+filter_options_(Tag, [KeyValue|Options], Filter) ->
+    Key = get_option_key(KeyValue),
+    case lists:member(Key, Filter) of
+	true ->
+	    lager:warning("~w: filter option ~w will be ignored", [Tag, Key]),
+	    filter_options_(Tag, Options, Filter);
+	false ->
+	    [KeyValue|filter_options_(Tag,Options,Filter)]
+    end;
+filter_options_(_Tag, [], _Filter) ->
+    [].
+
+-spec merge_options(Options::list(option()),
+		    NewOtions::list(option())) ->
+			   list(option()).
+
+merge_options(Options, NewOptions) ->
+    merge_options(Options, NewOptions, NewOptions).
+
+merge_options(Options, [KeyValue|NewOptions], NewOptions0) ->
+    Key = get_option_key(KeyValue),
+    merge_options(proplists:delete(Key, Options), NewOptions, NewOptions0);
+merge_options(Options, [], NewOptions0) ->
+    Options ++ NewOptions0.
+
+get_option_key(Key) when is_atom(Key) -> Key;
+get_option_key(KeyValue) when is_tuple(KeyValue) -> element(1,KeyValue).

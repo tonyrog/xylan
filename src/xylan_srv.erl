@@ -170,14 +170,17 @@ init(Args0) ->
     ServerID = proplists:get_value(id,Args,""),
     AuthTimeout = proplists:get_value(auth_timeout,Args,?DEFAULT_AUTH_TIMEOUT),
     PingTimeout = proplists:get_value(ping_timeout,Args,?DEFAULT_PING_TIMEOUT),
+    ASocketOpts = xylan_lib:filter_options(server,proplists:get_value(user_socket_options,Args,[])),
+    BSocketOpts = xylan_lib:filter_options(server,proplists:get_value(client_socket_options,Args,[])),
+    
     Clients =
 	[begin
 	     SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
 	     CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
 	     %% CPingTimeout = proplists:get_value(ping_timeout,ClientConf,PingTimeout),
 	     Route = proplists:get_value(route, ClientConf),
-	     ASocketOpts=xylan_lib:filter_options(client,proplists:get_value(a_socket_options,ClientConf,[])),
-	     BSocketOpts=xylan_lib:filter_options(client,proplists:get_value(b_socket_options,ClientConf,[])),
+	     ASocketOpts1=xylan_lib:merge_filter_options(ASocketOpts,xylan_lib:filter_options(server,proplists:get_value(user_socket_options,ClientConf,[]))),
+	     BSocketOpts1=xylan_lib:merge_filter_options(BSocketOpts,xylan_lib:filter_options(server,proplists:get_value(client_socket_options,ClientConf,[]))),
 	     {ok,CPid} = xylan_session:start(),
 	     CMon = erlang:monitor(process, CPid),
 	     Config = [{client_id,ClientID},
@@ -193,8 +196,8 @@ init(Args0) ->
 		       client_key = CKey,
 		       auth_timeout = AuthTimeout,
 		       ping_timeout = PingTimeout,
-		       a_socket_options = ASocketOpts,
-		       b_socket_options = BSocketOpts,
+		       a_socket_options = ASocketOpts1,
+		       b_socket_options = BSocketOpts1,
 		       pid = CPid,
 		       mon = CMon,
 		       route = Route }

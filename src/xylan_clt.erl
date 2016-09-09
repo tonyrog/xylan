@@ -82,7 +82,8 @@
 	  ping_timer :: reference(), %% when to send next ping, control channel
 	  pong_timer :: reference(),   %% wdt timer for pong
 	  pong_time :: erlang:timestamp(),  %% last pong time
-	  socket_options = [] ::list(), %% from config-file
+	  a_socket_options = [] ::list(), %% from config-file service options
+	  b_socket_options = [] ::list(), %% from config-file server options
 	  route = []
 	}).
 
@@ -146,9 +147,10 @@ init(Args0) ->
     ClientKey = xylan_lib:make_key(proplists:get_value(client_key,Args)),
     ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Args)),
     Authtimeout = proplists:get_value(auth_timeout,Args),
-    SocketOpts =
-	xylan_lib:filter_options(client,
-				 proplists:get_value(socket_options,Args,[])),
+    ASocketOpts = xylan_lib:filter_options(client,
+					   proplists:get_value(service_socket_options,Args,[])),
+    BSocketOpts = xylan_lib:filter_options(client,
+					   proplists:get_value(server_socket_options,Args,[])),
     self() ! reconnect,
     {ok, #state{ id = ID, 
 		 server_ip = IP, 
@@ -160,7 +162,8 @@ init(Args0) ->
 		 pong_timeout = PongTimeout,
 		 reconnect_interval = ReconnectInterval,
 		 auth_timeout = Authtimeout,
-		 socket_options = SocketOpts
+		 a_socket_options = ASocketOpts,
+		 b_socket_options = BSocketOpts
 	       }}.
 
 %%--------------------------------------------------------------------
@@ -318,8 +321,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 			    gen_server:cast(
 			      Pid,
 			      {connect,
-			       LocalIP,LocalPort,State#state.socket_options,
-			       RemoteIP,DataPort,State#state.socket_options})
+			       LocalIP,LocalPort,State#state.a_socket_options,
+			       RemoteIP,DataPort,State#state.b_socket_options})
 		    end,
 		    {noreply, State};
 		false ->
