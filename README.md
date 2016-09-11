@@ -123,22 +123,21 @@ On server side you set options like
          ...
          {clients, [
             {"home", [
-	       {user_socket_options, [user_side_option()]},
-               {client_socket_options, [client_side_option()]}
-               ...
+            {user_socket_options, [user_side_option()]},
+            {client_socket_options, [client_side_option()]}
             ...
         ]}
 
-Thea user_side_option() and client_side_option() may be set to
-any of the inet tcp options with exceptions of packet, mode, active
-header, exit_on_close, raw. 
+The user_side_option() and client_side_option() may be set to
+any of the inet tcp options, with exceptions of packet, mode, active
+header, exit_on_close and raw.
 
-On the client side you may set it in similar way
+On the client side you may set socket options in a similar way
 
     {xylan,
         [{mode, client},
          ...
-	 {service_socket_options, [service_side_option()]},
+         {service_socket_options, [service_side_option()]},
          {server_socket_options, [server_side_option()]},
          ...
     }
@@ -147,3 +146,41 @@ The service_socket_options are the options set towards the local
 machine on the device while the server_socket_options are the
 upstream options towards the central server.
 
+Useful socket options (read inet:setopts for more deatails )
+
+    {sndbuf, Size}
+                    Limit or Increase the amount the kernel is buffering for
+                    when sending to the socket.
+    {rcvbuf, Size}
+                    Limit or Increase the amount the kernel is buffering for
+                    when reading from the socket.
+    {buffer, Size}
+                    Driver buffer size.
+    {packet_size, Integer}
+                    Set maximum valid packet size.
+    {send_timemout, Integer}
+                    Set the sending timeout on a socket, this has the effect of
+                    closing the connection if the othr party does not consume 
+                    the data timely.
+    {send_timeout_close, Boolean}
+                    Make sure the socket closes when the timeout out is 
+                    triggered. This may affect how many sockets are available
+                    at any given moment.
+    {nodelay, Boolean}
+                    Tell kernel to send data as soon as possible and that it
+                    does not try to buffer anything.
+    {delay_send, Boolean}
+                    Do not try to send data immediatly but put on a queue
+                    in the erlang driver.
+    {keepalive, Boolean}
+                    Tell kernel to periodic send data to keep it alive.
+    {high_msgq_watermark, Size}
+                    See inet:setopts for details
+    {high_watermark, Size}
+                    See inet:setopts for details
+    {low_msgq_watermark, Size}
+                    See inet:setopts for details
+    {low_watermark, Size}
+                   See inet:setopts for details
+    {show_econnreset,Boolean}
+                    Report RST as an error

@@ -72,8 +72,16 @@ get_family_addr([],_Family) -> {error, enoent}.
 			    OkOptions::list(option()).
 %% Note: KeyValue may contain the raw option and that 
 filter_options(Tag, Options) ->
-    filter_options_(Tag, Options, [packet,mode,active,
-				   header,exit_on_close,raw]).
+    filter_options_(Tag, Options, [packet,
+				   mode, list, binary,
+				   deliver,
+				   line_delimiter,
+				   active,
+				   header,
+				   exit_on_close,
+				   raw,
+				   line_delimiter
+				  ]).
 
 filter_options_(Tag, [KeyValue|Options], Filter) ->
     Key = get_option_key(KeyValue),
