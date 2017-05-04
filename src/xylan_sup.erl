@@ -42,7 +42,7 @@ init([]) ->
     Child =
 	case application:get_env(xylan, mode) of
 	    {ok,client} ->
-		?CHILD(xylan_clt, [], worker);
+		?CHILD(xylan_clt_sup, [], worker);
 	    {ok,server} ->
 		?CHILD(xylan_srv, [], worker)
 	end,

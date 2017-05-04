@@ -43,8 +43,8 @@
 	 code_change/3]).
 
 %% test
--export([dump/0]).
--export([socket/0]).
+-export([dump/0, dump/1]).
+-export([socket/0, socket/1]).
  
 -define(SERVER, ?MODULE).
 
@@ -59,7 +59,8 @@
 
 -record(state,
 	{
-	  id :: string(),  %% client id
+	  server_id :: string(),  %% id of server in config
+	  id :: string(),      %% client id (authentication id)
 	  tag = tcp,
 	  tag_closed = tcp_closed,
 	  tag_error  = tcp_error,
@@ -70,7 +71,7 @@
 	  server_auth = false :: boolean(),
 	  auth_timeout = ?DEFAULT_AUTH_TIMEOUT :: timeout(),
 	  auth_timer :: reference(),
-	  server_id  = "",
+	  server_name = "",    %%% name of the connected server
 	  server_key  :: binary(),
 	  client_key  :: binary(),
 	  ping_interval = ?DEFAULT_PING_INTERVAL :: timeout(),
@@ -99,22 +100,36 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    start_link([]).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 start_link(Options) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
+    gen_server:start_link(?MODULE, Options, []).
 
 get_status() ->
-    gen_server:call(?SERVER, get_status).
+    case erlang:whereis(xylan_clt) of
+	undefined ->
+	    {ok,lists:map(
+		  fun({ID,Pid,_Type,_Args}) ->
+			  {ok,Status} = gen_server:call(Pid, get_status),
+			  [{server_id,ID}|Status]
+		  end, supervisor:which_children(xylan_clt_sup))};
+	Pid ->
+	    gen_server:call(Pid, get_status)
+    end.
 
 config_change(Changed,New,Removed) ->
     gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
 
 dump() ->
-    gen_server:call(?SERVER, dump).
+    dump(erlang:whereis(?SERVER)).
+dump(Pid) ->
+    gen_server:call(Pid, dump).
 
 socket() ->
-    gen_server:call(?SERVER, socket).
+    socket(erlang:whereis(?SERVER)).
+
+socket(Pid) ->
+    gen_server:call(Pid, socket).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -133,7 +148,20 @@ socket() ->
 %% @end
 %%--------------------------------------------------------------------
 init(Args0) ->
-    Args = Args0 ++ application:get_all_env(xylan),
+    ServerID =  proplists:get_value(server_id,Args0),
+    Env = application:get_all_env(xylan),
+    Args1 = if ServerID =:= undefined ->
+		    Env;
+	      true ->
+		    case application:get_env(xylan, servers) of
+			{ok,ServerList} ->
+			    proplists:get_value(ServerID, ServerList) ++
+				proplists:delete(servers,Env);
+			undefined ->
+			    Env
+		    end
+	    end,
+    Args = Args0 ++ Args1,
     ID = proplists:get_value(id,Args,""),  %% reject if not set ?
     IP = proplists:get_value(server_ip,Args,"127.0.0.1"),
     Port = proplists:get_value(server_port,Args,?DEFAULT_CNTL_PORT),
@@ -152,7 +180,8 @@ init(Args0) ->
     BSocketOpts = xylan_lib:filter_options(client,
 					   proplists:get_value(server_socket_options,Args,[])),
     self() ! reconnect,
-    {ok, #state{ id = ID, 
+    {ok, #state{ server_id = ServerID,
+		 id = ID, 
 		 server_ip = IP, 
 		 server_port = Port, 
 		 server_key = ServerKey,
@@ -186,7 +215,7 @@ handle_call(get_status, _From, State) ->
 	if
 	    State#state.server_sock =/= undefined,
 	    not State#state.server_auth ->
-		AuthTimeRemain = erlang:read_timer(State#state.auth_timer),
+		AuthTimeRemain = read_timer(State#state.auth_timer),
 		[{status,auth},{auth_time_remain,AuthTimeRemain}];
 
 	    State#state.server_sock =/= undefined,
@@ -201,10 +230,10 @@ handle_call(get_status, _From, State) ->
 		LastSeen = time_since_ms(os:timestamp(),
 					 State#state.session_time),
 		[{status,down},
-		 {reconnect_time,erlang:read_timer(State#state.auth_timer)},
+		 {reconnect_time,read_timer(State#state.auth_timer)},
 		 {last_seen,LastSeen}]
 	end,
-    {reply, {ok, [{server_id, State#state.server_id} | Status]}, State};
+    {reply, {ok,[{server_name, State#state.server_name} | Status]}, State};
 
 handle_call({config_change,_Changed,_New,_Removed},_From,State) ->
     io:format("config_change changed=~p, new=~p, removed=~p\n",
@@ -255,20 +284,18 @@ handle_info(_Info={Tag,Socket,Data}, State) when
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
     xylan_socket:setopts(State#state.server_sock, [{active, once}]),
     try binary_to_term(Data, [safe]) of
-	_Mesg={auth_res,[{id,ServerID},{chal,Chal},{cred,Cred}]} -> 
+	_Mesg={auth_res,[{id,ServerName},{chal,Chal},{cred,Cred}]} -> 
 	    %% auth and cred from server
 	    lager:debug("auth_res: ~p ok", [_Mesg]),
-	    %% crypto:sha is used instead of crypto:hash R15!!
-	    case crypto:sha([State#state.server_key,State#state.server_chal]) of
+	    case crypto:hash(sha,[State#state.server_key,State#state.server_chal]) of
 		Cred ->
-		    lager:debug("credential from server ~p ok", [ServerID]),
+		    lager:debug("credential from server ~p ok", [ServerName]),
 		    cancel_timer(State#state.auth_timer),
-		    %% crypto:sha is used instead of crypto:hash R15!!
-		    Cred1 = crypto:sha([State#state.client_key,Chal]),
+		    Cred1 = crypto:hash(sha,[State#state.client_key,Chal]),
 		    send(State#state.server_sock, 
 			 {auth_ack,[{id,State#state.id},{cred,Cred1}]}),
 		    PingTimer = start_timer(State#state.ping_interval,ping),
-		    {noreply, State#state { server_id = ServerID, 
+		    {noreply, State#state { server_name = ServerName, 
 					    server_auth = true,
 					    auth_timer = undefined,
 					    ping_timer = PingTimer }};
@@ -477,6 +504,9 @@ start_timer(undefined,_Tag) -> undefined;
 start_timer(infinity,_Tag) -> undefined;
 start_timer(Time,Tag) when is_integer(Time), Time >= 0 ->
     erlang:start_timer(Time,self(),Tag).
+
+read_timer(undefined) -> 0;
+read_timer(Timer) -> erlang:read_timer(Timer).
 
 reconnect_after(Timeout) ->
     erlang:start_timer(Timeout, self(),reconnect).

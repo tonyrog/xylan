@@ -185,9 +185,7 @@ handle_cast(_Req={auth_req,[{id,_ID},{chal,Chal}]}, State) when
       State#state.client_auth =:= false ->
     lager:debug("auth_req: ~p", [_Req]),
     Chal1 = crypto:strong_rand_bytes(16),  %% generate challenge
-    %% Chal1 = crypto:rand_bytes(16),  %% generate challenge
-    %% crypto:sha is used instead of crypto:hash R15!!
-    Cred = crypto:sha([State#state.server_key,Chal]), %% server cred
+    Cred = crypto:hash(sha,[State#state.server_key,Chal]), %% server cred
     send(State#state.socket, {auth_res,[{id,State#state.server_id},
 					{chal,Chal1},{cred,Cred}]}),
     lager:info("client ~p reply and challenge sent", [State#state.client_id]),
@@ -221,8 +219,7 @@ handle_info({Tag,Socket,Data}, State) when
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_ack, [{id,_ClientID},{cred,Cred}]} ->
 	    lager:debug("auth_ack: ~p", [_Mesg]),
-	    %% crypto:sha is used instead of crypto:hash R15!!
-	    case crypto:sha([State#state.client_key,State#state.client_chal]) of
+	    case crypto:hash(sha,[State#state.client_key,State#state.client_chal]) of
 		Cred ->
 		    lager:info("client ~p credential accepted", 
 			  [State#state.client_id]),

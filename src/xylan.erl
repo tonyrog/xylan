@@ -41,8 +41,8 @@ status() ->
     case proplists:get_value(mode,Env) of    
 	client ->
 	    case xylan_clt:get_status() of
-		{ok,Status} ->
-		    format_prop_list(Status);
+		{ok,StatusLists} ->
+		    lists:foreach(fun format_prop_list/1, StatusLists);
 		_Error ->
 		    io:format("error: ~p\n", [_Error])
 	    end;
