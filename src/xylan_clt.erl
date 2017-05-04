@@ -186,7 +186,7 @@ handle_call(get_status, _From, State) ->
 	if
 	    State#state.server_sock =/= undefined,
 	    not State#state.server_auth ->
-		AuthTimeRemain = erlang:read_timer(State#state.auth_timer),
+		AuthTimeRemain = read_timer(State#state.auth_timer),
 		[{status,auth},{auth_time_remain,AuthTimeRemain}];
 
 	    State#state.server_sock =/= undefined,
@@ -201,7 +201,7 @@ handle_call(get_status, _From, State) ->
 		LastSeen = time_since_ms(os:timestamp(),
 					 State#state.session_time),
 		[{status,down},
-		 {reconnect_time,erlang:read_timer(State#state.auth_timer)},
+		 {reconnect_time,read_timer(State#state.auth_timer)},
 		 {last_seen,LastSeen}]
 	end,
     {reply, {ok, [{server_id, State#state.server_id} | Status]}, State};
@@ -477,6 +477,9 @@ start_timer(undefined,_Tag) -> undefined;
 start_timer(infinity,_Tag) -> undefined;
 start_timer(Time,Tag) when is_integer(Time), Time >= 0 ->
     erlang:start_timer(Time,self(),Tag).
+
+read_timer(undefined) -> 0;
+read_timer(Timer) -> erlang:read_timer(Timer).
 
 reconnect_after(Timeout) ->
     erlang:start_timer(Timeout, self(),reconnect).
