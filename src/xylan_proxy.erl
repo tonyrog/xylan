@@ -169,6 +169,8 @@ handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
     case xylan_socket:connect(LIP,LPort,LOptions,3000) of
 	{ok,A} ->
 	    lager:debug("A is connected"),
+	    {ok,_Peer} = xylan_socket:peername(A),
+	    lager:debug("A peer: ~p", [_Peer]),
 	    ROptions = [{mode,binary},{packet,4},{nodelay,true}] ++ ROpts,
 	    case xylan_socket:connect(RIP,RPort,ROptions,3000) of
 		{ok,B} ->
@@ -222,7 +224,9 @@ handle_info({Tag,Socket,Data}, State) when
     lager:debug("data from A ~p", [Data]),
     if State#state.b_sock =:= undefined -> %% before proxy is connected
 	    {ok,{LocalIP,LocalPort}} = xylan_socket:sockname(State#state.a_sock),
-	    {ok,{RemoteIP,RemotePort}} = xylan_socket:peername(State#state.a_sock),
+	    {ok,{RemoteIP,RemotePort}} =
+		xylan_socket:peername(State#state.a_sock),
+	    lager:debug("A peer: ~p", [{RemoteIP,RemotePort}]),
 	    RouteInfo = [{dst_ip,inet:ntoa(LocalIP)},{dst_port,LocalPort},
 			 {src_ip,inet:ntoa(RemoteIP)},{src_port,RemotePort},
 			 {data,Data}],
@@ -240,6 +244,8 @@ handle_info({Tag,Socket,Data}, State) when
       Tag =:= State#state.tag_b,
       Socket =:= (State#state.b_sock)#xylan_socket.socket ->
     lager:debug("data from B ~p", [Data]),
+    {ok,{RemoteIP,RemotePort}} = xylan_socket:peername(State#state.b_sock),
+    lager:debug("B peer~p", [{RemoteIP,RemotePort}]),
     xylan_socket:send(State#state.a_sock, Data),
     xylan_socket:setopts(State#state.b_sock, [{active,once}]),
     lager:debug("data from B sent", []),
