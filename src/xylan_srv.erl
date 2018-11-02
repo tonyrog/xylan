@@ -35,13 +35,11 @@
 -export([start_link/1]).
 -export([get_status/0]).
 -export([config_change/3]).
+-export([get_client_list/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
-
-%% test
--export([dump/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -144,9 +142,6 @@ get_status() ->
 config_change(Changed,New,Removed) ->
     gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
     
-dump() ->
-    gen_server:call(?MODULE, dump).
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -201,7 +196,7 @@ init(Args0) ->
 		       pid = CPid,
 		       mon = CMon,
 		       route = Route }
-	 end || {ClientID,ClientConf} <- proplists:get_value(clients,Args,[])],
+	 end || {ClientID,ClientConf} <- get_client_list(Args)],
     {ok,CntlSock} = start_client_cntl(CntlPort),
     {ok,DataSock} = start_client_data(DataPort),
     UserSocks = start_user(UserPorts),
@@ -287,10 +282,6 @@ handle_call({config_change,_Changed,_New,_Removed},_From,State) ->
 	      [_Changed,_New,_Removed]),
     {reply, ok, State};
     
-handle_call(dump, _From, State) ->
-    io:format("State:\n~p\n",[State]),
-    {reply, ok, State};
-
 handle_call(_Request, _From, State) ->
     lager:warning("got unknown request ~p\n", [_Request]),
     {reply, {error, bad_call}, State}.
@@ -565,6 +556,27 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_client_list() ->
+    get_client_list(application:get_all_env(xylan)).
+
+get_client_list(Args) ->
+    proplists:get_value(clients,Args,[]) ++ load_client_configs(Args).
+
+load_client_configs(Args) ->
+    case proplists:get_value(config_dir,Args) of
+	undefined -> [];
+	Dir ->
+	    case file:list_dir(Dir) of
+		{ok,Files} ->
+		    lists:append([xylan_lib:load_config(Dir,File) || 
+				     File <- Files]);
+		{error,Reason} ->
+		    lager:error("unable to list client configs dir ~s ~p",
+				[Dir, Reason]),
+		    []
+	    end
+    end.
 
 cancel_timer(undefined) -> false;
 cancel_timer(Timer) -> erlang:cancel_timer(Timer).

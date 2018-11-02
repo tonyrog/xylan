@@ -52,10 +52,7 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    Servers = case application:get_env(xylan, servers) of
-		  {ok,List} -> List;
-		  undefined -> []
-	      end,
+    Servers = xylan_clt:get_server_list(),
     ChildList =
 	if Servers =:= [] ->
 		Name = case application:get_env(xylan, server_id) of

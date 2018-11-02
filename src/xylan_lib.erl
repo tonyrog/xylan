@@ -32,6 +32,7 @@
 -export([lookup_ifaddr/2]).
 -export([filter_options/2]).
 -export([merge_options/2]).
+-export([load_config/2]).
 
 make_key(Key) when is_binary(Key) ->  Key;
 make_key(Key) when is_integer(Key) -> <<Key:64>>;
@@ -110,3 +111,25 @@ merge_options(Options, [], NewOptions0) ->
 
 get_option_key(Key) when is_atom(Key) -> Key;
 get_option_key(KeyValue) when is_tuple(KeyValue) -> element(1,KeyValue).
+
+load_config(Dir, File) ->
+    case filename:extension(File) of
+	".config" ->
+	    FileName = filename:join(Dir, File),
+	    case file:consult(FileName) of
+		{ok,Config} ->
+		    Config;
+		{error,{Ln,Mod,Error}} when is_integer(Ln), is_atom(Mod) ->
+		    lager:error("unable to load config file ~s:~w: ~s",
+				[FileName,Ln,Mod:format_error(Error)]),
+		    [];
+		{error,Error} ->
+		    lager:error("unable to load config file ~s ~p\n", 
+				[FileName, Error]),
+		    []
+	    end;
+	_ ->
+	    lager:error("ignore file ~s must have extension .config\n",
+			[File]),
+	    []
+    end.

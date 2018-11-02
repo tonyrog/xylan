@@ -33,6 +33,8 @@
 -export([start_link/1]).
 -export([get_status/0]).
 -export([config_change/3]).
+-export([get_server_list/0]).
+-export([get_server_config/1]).
 
 %% gen_server callbacks
 -export([init/1, 
@@ -43,7 +45,6 @@
 	 code_change/3]).
 
 %% test
--export([dump/0, dump/1]).
 -export([socket/0, socket/1]).
  
 -define(SERVER, ?MODULE).
@@ -120,11 +121,6 @@ get_status() ->
 config_change(Changed,New,Removed) ->
     gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
 
-dump() ->
-    dump(erlang:whereis(?SERVER)).
-dump(Pid) ->
-    gen_server:call(Pid, dump).
-
 socket() ->
     socket(erlang:whereis(?SERVER)).
 
@@ -148,18 +144,15 @@ socket(Pid) ->
 %% @end
 %%--------------------------------------------------------------------
 init(Args0) ->
-    ServerID =  proplists:get_value(server_id,Args0),
+    ServerID = proplists:get_value(server_id,Args0),
     Env = application:get_all_env(xylan),
     Args1 = if ServerID =:= undefined ->
 		    Env;
 	      true ->
-		    case application:get_env(xylan, servers) of
-			{ok,ServerList} ->
-			    proplists:get_value(ServerID, ServerList) ++
-				proplists:delete(servers,Env);
-			undefined ->
-			    Env
-		    end
+		    Server = get_server_config(ServerID),
+		    Env1 = proplsts:delete(server,Env),
+		    Env2 = proplsts:delete(config_dir,Env1),
+		    Server ++ Env2
 	    end,
     Args = Args0 ++ Args1,
     ID = proplists:get_value(id,Args,""),  %% reject if not set ?
@@ -238,10 +231,6 @@ handle_call(get_status, _From, State) ->
 handle_call({config_change,_Changed,_New,_Removed},_From,State) ->
     io:format("config_change changed=~p, new=~p, removed=~p\n",
 	      [_Changed,_New,_Removed]),
-    {reply, ok, State};
-
-handle_call(dump,_From,State) ->
-    io:format("state=~p\n", [State]),
     {reply, ok, State};
 
 handle_call(socket,_From,State) when State#state.server_sock =/= undefined ->
@@ -450,6 +439,34 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_server_config(ServerID) ->
+    proplists:get_value(ServerID, get_server_list(), []).
+
+get_server_list() ->
+    case application:get_env(xylan, servers) of
+	{ok,ServerList} ->
+	    ServerList;
+	undefined ->
+	    []
+    end ++ load_server_configs().
+
+
+load_server_configs() ->
+    case application:get_env(xylan, config_dir) of
+	{ok,Dir} ->
+	    case file:list_dir(Dir) of
+		{ok,Files} ->
+		    lists:append([xylan_lib:load_config(Dir,File) || 
+				     File <- Files]);
+		{error,Reason} ->
+		    lager:error("unable to list server configs dir ~s ~p",
+				[Dir, Reason]),
+		    []
+	    end;
+	undefined ->
+	    []
+    end.
 
 time_since_ms(_T1, undefined) ->
     never;
