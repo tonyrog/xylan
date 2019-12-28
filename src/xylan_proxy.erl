@@ -169,8 +169,7 @@ handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
     case xylan_socket:connect(LIP,LPort,LOptions,3000) of
 	{ok,A} ->
 	    lager:debug("A is connected"),
-	    {ok,_Peer} = xylan_socket:peername(A),
-	    lager:debug("A peer: ~p", [_Peer]),
+	    lager:debug("A peer: ~p", [element(2,xylan_socket:peername(A))]),
 	    ROptions = [{mode,binary},{packet,4},{nodelay,true}] ++ ROpts,
 	    case xylan_socket:connect(RIP,RPort,ROptions,3000) of
 		{ok,B} ->
@@ -244,8 +243,7 @@ handle_info({Tag,Socket,Data}, State) when
       Tag =:= State#state.tag_b,
       Socket =:= (State#state.b_sock)#xylan_socket.socket ->
     lager:debug("data from B ~p", [Data]),
-    {ok,{RemoteIP,RemotePort}} = xylan_socket:peername(State#state.b_sock),
-    lager:debug("B peer~p", [{RemoteIP,RemotePort}]),
+    lager:debug("B peer~p", [element(2,xylan_socket:peername(State#state.b_sock))]),
     xylan_socket:send(State#state.a_sock, Data),
     xylan_socket:setopts(State#state.b_sock, [{active,once}]),
     lager:debug("data from B sent", []),

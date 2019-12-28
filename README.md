@@ -17,7 +17,7 @@ Example server config:
        {id, "server"},
        %% Listen ports {interface-name,port} | {interface-ip,port} | port
        {port, [
-         46122,                 %% default listen port 
+         46122,                 %% default listen port
          {"eth0",222},          %% listen port 222 bound to eth0
          {"127.0.0.1", 222}     %% listen port 222 bound to localhost
        },
@@ -29,15 +29,15 @@ Example server config:
        {client_socket_options, [{send_timeout, 20000},{send_timeout_close,true}]},
        {clients, [
          {"home", [
-	   %% Keys may be generated with xylan:generate_key(), 
-	   %% if 64 bit big-endian integer is enough. 
+	   %% Keys may be generated with xylan:generate_key(),
+	   %% if 64 bit big-endian integer is enough.
 	   %% Otherwise any binary/io-list will do.
            {server_key,  3177648541185394227},  %% server is signing using this key
            {client_key,  12187761947737533676}, %% client is signing using this key
 	   {user_socket_options, [{sndbuf, 4096}]},
 	   {client_socket_options, [{sndbuf, 2048}]},
            {route, [
-    	     [{data, "SSH-2.0.*"}],
+		     [{data, "SSH-2.0.*"}],
              [{data, "GET .*"}]
            ]}
          ]},
@@ -48,7 +48,7 @@ Example server config:
 	   {user_socket_options, [{sndbuf, 8192}]},
 
            {route, [
-    	     [{ip,"eth0"},{port,222},{data, "SSH-2.0.*"}],
+			   [{dst_ip,"eth0"},{dst_port,222},{data, "SSH-2.0.*"}],
            ]}
          ]}
        ]}
@@ -72,20 +72,20 @@ Client routing:  "home"
        {server_socket_options, [{sndbuf,8192},{rcvbuf,2048}]},
 
        {route,[
-         { [{data, "SSH-2.0.*"},{port,22}],  [{port,22}] },
+         { [{data, "SSH-2.0.*"},{src_port,22}],  [{port,22}] },
          { [{data, "GET .*"}],  [{ip,"127.0.0.1"},{port,8888}] },
-         { [{port,23},{src_ip,"216.58.209.132"}],  [{ip,"eth0"},{port,23}] }
+         { [{src_port,23},{src_ip,"216.58.209.132"}],  [{ip,"eth0"},{port,23}] }
        ]}
     ]}.
 
 Options available for determin the route / client
 
     {data, RE}     Match initial data for match, as a special case
-                   if RE is 'ssl' then data is check for a SSL client 
+                   if RE is 'ssl' then data is check for a SSL client
                    connect pattern.
 
     {dst_ip, RE}   Match destination ip address, that is the server ip address
-                   of the xylan server. The RE may also be an IP tuple in 
+                   of the xylan server. The RE may also be an IP tuple in
                    which case the destination IP is matched exactly
 
     {dst_port, RE} Match destination port number with a regular expression
@@ -104,7 +104,7 @@ Client options for connecting a matching route
                    this is interpreted as a unix domain socket.
 
     {ip, Name}     IP address to connect to, this default to {127,0,0,1}.
-                   Only ipv4 is supported right now. Name can also be an 
+                   Only ipv4 is supported right now. Name can also be an
 		   interface name, in which case the interface address
 		   (ipv4) is used.
 
@@ -160,10 +160,10 @@ Useful socket options (read inet:setopts for more deatails )
                     Set maximum valid packet size.
     {send_timemout, Integer}
                     Set the sending timeout on a socket, this has the effect of
-                    closing the connection if the othr party does not consume 
+                    closing the connection if the othr party does not consume
                     the data timely.
     {send_timeout_close, Boolean}
-                    Make sure the socket closes when the timeout out is 
+                    Make sure the socket closes when the timeout out is
                     triggered. This may affect how many sockets are available
                     at any given moment.
     {nodelay, Boolean}

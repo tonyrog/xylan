@@ -50,6 +50,11 @@
 -define(DEFAULT_DATA_TIMEOUT, 5000). %% timeout for proxy data connection
 -define(DEFAULT_PING_TIMEOUT, 30000). %% timeout for lack of ping packet
 
+-define(is_ipv4(IP),
+	(((element(1,(IP)) bor element(2,(IP)) bor
+	   element(3,(IP)) bor element(4,(IP))) band (bnot 16#ff)) =:= 0)).
+-define(is_port(Port), (((Port) band (bnot 16#ffff)) =:= 0)).
+
 -include("xylan_socket.hrl").
 
 
@@ -57,9 +62,11 @@
 -type timer() :: reference().
 
 -type user_port() :: 
-	inet:port_numer() |
-	{inet:ip_address(), inet:port_numer()} |
-	{interface(), inet:port_numer()}.
+	inet:port_number() |
+	{inet:ip_address(), inet:port_number()} |
+	{interface(), inet:port_number()} |
+	{atom(),inet:ip_address(), inet:port_number()} |
+	{atom(),interface(), inet:port_number()}.
 
 -type user_ports() :: 
 	user_port() | [user_port()].
@@ -68,8 +75,10 @@
 
 -type route_config() :: 
 	{data, regexp()} |
-	{ip, inet:ip_address()|regexp()} |
-	{port, integer()}.
+	{src_ip, inet:ip_address()|regexp()} |
+	{dst_ip, inet:ip_address()|regexp()} |
+	{src_port, integer()} |
+	{dst_port, integer()|atom()}.
 
 -record(client,
 	{
@@ -159,19 +168,20 @@ config_change(Changed,New,Removed) ->
 %%--------------------------------------------------------------------
 init(Args0) ->
     Args = Args0 ++ application:get_all_env(xylan),
-    CntlPort = proplists:get_value(client_port,Args,?DEFAULT_CNTL_PORT),
-    DataPort = proplists:get_value(data_port,Args,?DEFAULT_DATA_PORT),
-    UserPorts = proplists:get_value(port,Args,?DEFAULT_PORT),
-    ServerID = proplists:get_value(id,Args,""),
+    CntlPort    = proplists:get_value(client_port,Args,?DEFAULT_CNTL_PORT),
+    DataPort    = proplists:get_value(data_port,Args,?DEFAULT_DATA_PORT),
+    UserPorts   = validate_listen_ports(proplists:get_value(port,Args,?DEFAULT_PORT)),
+    ServerID    = proplists:get_value(id,Args,""),
     AuthTimeout = proplists:get_value(auth_timeout,Args,?DEFAULT_AUTH_TIMEOUT),
     PingTimeout = proplists:get_value(ping_timeout,Args,?DEFAULT_PING_TIMEOUT),
     ASocketOpts = xylan_lib:filter_options(server,proplists:get_value(user_socket_options,Args,[])),
     BSocketOpts = xylan_lib:filter_options(server,proplists:get_value(client_socket_options,Args,[])),
+    ClientList = validate_clients(get_client_list(Args), UserPorts),
     
     Clients =
 	[begin
-	     SKey=xylan_lib:make_key(proplists:get_value(server_key,ClientConf)),
-	     CKey=xylan_lib:make_key(proplists:get_value(client_key,ClientConf)),
+	     SKey=proplists:get_value(server_key,ClientConf),
+	     CKey=proplists:get_value(client_key,ClientConf),
 	     %% CPingTimeout = proplists:get_value(ping_timeout,ClientConf,PingTimeout),
 	     Route = proplists:get_value(route, ClientConf),
 	     ASocketOpts1=xylan_lib:merge_options(ASocketOpts,xylan_lib:filter_options(server,proplists:get_value(user_socket_options,ClientConf,[]))),
@@ -196,7 +206,7 @@ init(Args0) ->
 		       pid = CPid,
 		       mon = CMon,
 		       route = Route }
-	 end || {ClientID,ClientConf} <- get_client_list(Args)],
+	 end || {ClientID,ClientConf} <- ClientList],
     {ok,CntlSock} = start_client_cntl(CntlPort),
     {ok,DataSock} = start_client_data(DataPort),
     UserSocks = start_user(UserPorts),
@@ -228,21 +238,11 @@ start_client_data(Port) ->
 
 start_user(Ports) when is_list(Ports) ->
     lists:foldl(
-      fun(Port,Acc) when is_integer(Port) ->
-	      open_user_port(Port,any) ++ Acc;
-	 ({IP,Port},Acc) when is_tuple(IP), is_integer(Port) ->
-	      open_user_port(Port,IP) ++ Acc;
-	 ({Name,Port},Acc) when is_list(Name), is_integer(Port) ->
-	      case xylan_lib:lookup_ip(Name,inet) of
-		  {error,_} ->
-		      lager:warning("No such interface ~p",[Name]),
-		      Acc;
-		  {ok,IP} ->
-		      open_user_port(Port,IP) ++ Acc
-	      end
-      end, [], Ports);
-start_user(Port) ->
-    start_user([Port]).
+      fun({Name,IP,Port},Acc) when is_atom(Name), is_integer(Port) ->
+	      lager:info("open user port ~s ~w @ ~w\n", 
+			 [Name,Port,IP]),
+	      open_user_port(Port,IP) ++ Acc
+      end, [], Ports).
 
 open_user_port(Port,IP) when is_integer(Port) ->
     case xylan_socket:listen(Port, [tcp], [{reuseaddr,true},
@@ -556,6 +556,121 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+validate_clients(Clients, UserPorts) ->
+    [validate_client(C,UserPorts) || C <- Clients].
+
+validate_client({Name,C}, UserPorts) ->
+    SKey = validate_key(server_key,proplists:get_value(server_key, C)),
+    CKey = validate_key(client_key,proplists:get_value(client_key, C)),
+    Route = validate_route(proplists:get_value(route,C,[]), UserPorts),
+    UOpts = proplists:get_value(user_socket_options,C,[]),
+    COpts = proplists:get_value(client_socket_options,C,[]),
+    C1 = {Name,[{server_key, SKey},
+		{client_key, CKey},
+		{route, Route},
+		{user_socket_options, UOpts},
+		{client_socket_options, COpts}]},
+    C1.
+
+validate_key(KeyType,Key) ->
+    try xylan_lib:make_key(Key) of
+	BinKey -> BinKey
+    catch
+	error:_ ->
+	    lager:error("~s key format error\n", [KeyType]),
+	    erlang:error(bad_key_format)
+    end.
+
+validate_route(Route, UserPorts) ->
+    [validate_rts(R,UserPorts)||R<-Route].
+
+validate_rts([{dst_port,Port}|R], UserPorts) ->
+    [{dst_port,validate_port(Port,UserPorts)}|validate_rts(R,UserPorts)];
+validate_rts([{src_port,Port}|R], UserPorts) ->
+    [{src_port,validate_port(Port,[])}|validate_rts(R,UserPorts)];
+validate_rts([{dst_ip,IP}|R], UserPorts) ->
+    [{dst_ip,validate_ip(IP)}|validate_rts(R,UserPorts)];
+validate_rts([{src_ip,IP}|R], UserPorts) ->
+    [{src_ip,validate_ip(IP)}|validate_rts(R,UserPorts)];
+validate_rts([{data,Data}|R], UserPorts) ->
+    [{data,validate_route_data(Data)}|validate_rts(R,UserPorts)];
+validate_rts([], _UserPorts) ->
+    [].
+
+validate_route_data(undefined) -> undefined;
+validate_route_data(ssl) -> ssl;
+validate_route_data(RE) -> validate_re(RE).
+
+validate_re(RE) when is_list(RE); is_binary(RE) ->
+    case re:compile(RE) of
+	{ok,_Comp} -> RE;  %% may return Comp!!!
+	{error,{Error,_}} ->
+	    lager:error("bad regular expression ~s ~s\n",
+			[RE, Error]),
+	    erlang:error(bad_re_expr)
+    end.
+
+validate_ip(undefined) ->
+    undefined;
+validate_ip(IP) when ?is_ipv4(IP) ->
+    IP;
+validate_ip(IPorIFName) when is_list(IPorIFName) ->
+    case re:compile(IPorIFName) of
+	{ok,_Comp} -> IPorIFName;
+	{error,{Error,_}} ->
+	    lager:error("bad regular expression ~s ~s\n",
+			[IPorIFName, Error]),
+	    erlang:error(bad_re_expr)
+    end;
+validate_ip(_IP) ->
+    lager:error("bad ip name ~p\n", [_IP]),
+    erlang:error(bad_ip).
+
+validate_listen_ports(Ps) when is_list(Ps) ->
+    [validate_listen_port(P) || P <- Ps];
+validate_listen_ports(P) ->
+    [validate_listen_port(P)].
+
+validate_listen_port(Port) when ?is_port(Port) ->
+    {undefined,any,Port};
+validate_listen_port({any,Port}) when ?is_port(Port) ->
+    {undefined,any,Port};
+validate_listen_port({IfName,Port}) when ?is_port(Port) ->
+    case xylan_lib:lookup_ip(IfName,inet) of
+	{error,_} ->
+	    lager:warning("No such interface ~p",[IfName]),
+	    erlang:error(bad_interface);
+	{ok,IP} ->
+	    {undefined,IP,Port}
+    end;
+validate_listen_port({Name,IfName,Port}) when is_atom(Name),?is_port(Port) ->
+    case xylan_lib:lookup_ip(IfName,inet) of
+	{error,_} ->
+	    lager:warning("No such interface ~p",[Name]),
+	    erlang:error(bad_interface);
+	{ok,IP} ->
+	    {Name,IP,Port}
+    end.
+
+validate_port(undefined, _) -> undefined;
+validate_port(Port,_) when is_integer(Port), Port >= 0, Port =< 65535 ->
+    Port;
+validate_port(PortRE,_UserPort) when is_list(PortRE) ->
+    case re:compile(PortRE) of
+	{ok,_Comp} -> PortRE;
+	{error,{Error,_}} ->
+	    lager:error("bad regular expression ~s ~s\n",
+			[PortRE, Error]),
+	    erlang:error(bad_re_expr)
+    end;
+validate_port(Port,UserPort) when is_atom(Port) ->
+    case lists:keyfind(Port,1,UserPort) of
+	false ->
+	    lager:error("port name ~s not declared", [Port]),
+	    erlang:error(bad_port);
+	{_PortName,IfName,PortNum} -> {IfName,PortNum}
+    end.
 
 get_client_list() ->
     get_client_list(application:get_all_env(xylan)).
