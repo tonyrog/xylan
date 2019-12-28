@@ -150,8 +150,8 @@ init(Args0) ->
 		    Env;
 	      true ->
 		    Server = get_server_config(ServerID),
-		    Env1 = proplsts:delete(server,Env),
-		    Env2 = proplsts:delete(config_dir,Env1),
+		    Env1 = proplists:delete(server,Env),
+		    Env2 = proplists:delete(config_dir,Env1),
 		    Server ++ Env2
 	    end,
     Args = Args0 ++ Args1,
