@@ -34,6 +34,8 @@
 -export([merge_options/2]).
 -export([load_config/2]).
 
+-include("xylan_log.hrl").
+
 make_key(Key) when is_binary(Key) ->  Key;
 make_key(Key) when is_integer(Key) -> <<Key:64>>;
 make_key(Key) when is_list(Key) -> erlang:iolist_to_binary(Key);
@@ -88,7 +90,7 @@ filter_options_(Tag, [KeyValue|Options], Filter) ->
     Key = get_option_key(KeyValue),
     case lists:member(Key, Filter) of
 	true ->
-	    lager:warning("~w: filter option ~w will be ignored", [Tag, Key]),
+	    ?warning("~w: filter option ~w will be ignored", [Tag, Key]),
 	    filter_options_(Tag, Options, Filter);
 	false ->
 	    [KeyValue|filter_options_(Tag,Options,Filter)]
@@ -120,16 +122,16 @@ load_config(Dir, File) ->
 		{ok,Config} ->
 		    Config;
 		{error,{Ln,Mod,Error}} when is_integer(Ln), is_atom(Mod) ->
-		    lager:error("unable to load config file ~s:~w: ~s",
+		    ?error("unable to load config file ~s:~w: ~s",
 				[FileName,Ln,Mod:format_error(Error)]),
 		    [];
 		{error,Error} ->
-		    lager:error("unable to load config file ~s ~p\n", 
+		    ?error("unable to load config file ~s ~p\n", 
 				[FileName, Error]),
 		    []
 	    end;
 	_ ->
-	    lager:error("ignore file ~s must have extension .config\n",
+	    ?error("ignore file ~s must have extension .config\n",
 			[File]),
 	    []
     end.

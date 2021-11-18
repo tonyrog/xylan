@@ -40,7 +40,10 @@
 -export([tags/1, socket/1]).
 -export([request_type/1]).
 
+-include("xylan_log.hrl").
 -include("xylan_socket.hrl").
+
+-compile({nowarn_deprecated_function,[{ssl,ssl_accept,3}]}).
 
 %%
 %% List of protocols supported
@@ -63,7 +66,7 @@ listen(Port, Protos=[tcp|_], Opts0) ->
     Opts1 = proplists:expand([{binary, [{mode, binary}]},
 			      {list, [{mode, list}]}], Opts0),
     {TcpOpts, Opts2} = split_options(tcp_listen_options(), Opts1),
-    lager:debug("listen options=~w, other=~w\n", [TcpOpts, Opts2]),
+    ?debug("listen options=~w, other=~w\n", [TcpOpts, Opts2]),
     Active = proplists:get_value(active, TcpOpts, false),
     Mode   = proplists:get_value(mode, TcpOpts, list),
     Packet = proplists:get_value(packet, TcpOpts, 0),
@@ -155,18 +158,18 @@ connect(Host, Port, Protos=[tcp|_], Opts0, Timeout) -> %% tcp socket
     end.
 
 connect_upgrade(X, Protos0, Timeout) ->
-    lager:debug("connect protos=~w\n", [Protos0]),
+    ?debug("connect protos=~w\n", [Protos0]),
     case Protos0 of
 	[ssl|Protos1] ->
 	    Opts = X#xylan_socket.opts,
 	    {SSLOpts0,Opts1} = split_options(ssl_connect_opts(),Opts),
 	    {_,SSLOpts} = split_options([ssl_imp], SSLOpts0),
-	    lager:debug("SSL upgrade, options = ~w\n", [SSLOpts]),
-	    lager:debug("before ssl:connect opts=~w\n", 
+	    ?debug("SSL upgrade, options = ~w\n", [SSLOpts]),
+	    ?debug("before ssl:connect opts=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    case ssl_connect(X#xylan_socket.socket, SSLOpts, Timeout) of
 		{ok,S1} ->
-		    lager:debug("ssl:connect opt=~w\n", 
+		    ?debug("ssl:connect opt=~w\n", 
 			 [ssl:getopts(S1, [active,packet,mode])]),
 		    X1 = X#xylan_socket { socket=S1,
 					  mdata = ssl,
@@ -175,7 +178,7 @@ connect_upgrade(X, Protos0, Timeout) ->
 					  tags={ssl,ssl_closed,ssl_error}},
 		    connect_upgrade(X1, Protos1, Timeout);
 		Error={error,_Reason} ->
-		    lager:warning("ssl:connect error=~w\n", [_Reason]),
+		    ?warning("ssl:connect error=~w\n", [_Reason]),
 		    Error
 	    end;
 	[http|Protos1] ->
@@ -187,7 +190,7 @@ connect_upgrade(X, Protos0, Timeout) ->
 	    setopts(X, [{mode,X#xylan_socket.mode},
 			{packet,X#xylan_socket.packet},
 			{active,X#xylan_socket.active}]),
-	    lager:debug("after upgrade opts=~w\n", 
+	    ?debug("after upgrade opts=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    {ok,X}
     end.
@@ -253,7 +256,7 @@ accept(X, Timeout) when
     accept_upgrade(X, X#xylan_socket.protocol, Timeout).
 
 accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
-    lager:debug("accept protos=~w\n", [Protos0]),
+    ?debug("accept protos=~w\n", [Protos0]),
     case Protos0 of
 	[tcp|Protos1] ->
 	    case M:accept(X#xylan_socket.socket, Timeout) of
@@ -267,12 +270,12 @@ accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
 	    Opts = X#xylan_socket.opts,
 	    {SSLOpts0,Opts1} = split_options(ssl_listen_opts(),Opts),
 	    {_,SSLOpts} = split_options([ssl_imp], SSLOpts0),
-	    lager:debug("SSL upgrade, options = ~w\n", [SSLOpts]),
-	    lager:debug("before ssl_accept opt=~w\n", 
+	    ?debug("SSL upgrade, options = ~w\n", [SSLOpts]),
+	    ?debug("before ssl_accept opt=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
-	    case ssl_accept(X#xylan_socket.socket, SSLOpts, Timeout) of
+	    case handshake(X#xylan_socket.socket, SSLOpts, Timeout) of
 		{ok,S1} ->
-		    lager:debug("ssl_accept opt=~w\n", 
+		    ?debug("ssl_accept opt=~w\n", 
 			 [ssl:getopts(S1, [active,packet,mode])]),
 		    X1 = X#xylan_socket{socket=S1,
 				      mdata = ssl,
@@ -281,7 +284,7 @@ accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
 				      tags={ssl,ssl_closed,ssl_error}},
 		    accept_upgrade(X1, Protos1, Timeout);
 		Error={error,_Reason} ->
-		    lager:warning("ssl:ssl_accept error=~w\n", 
+		    ?warning("ssl:ssl_accept error=~w\n", 
 			 [_Reason]),
 		    Error
 	    end;
@@ -296,7 +299,7 @@ accept_upgrade(X=#xylan_socket { mdata = M }, Protos0, Timeout) ->
 	    setopts(X, [{mode,X#xylan_socket.mode},
 			{packet,X#xylan_socket.packet},
 			{active,X#xylan_socket.active}]),
-	    lager:debug("after upgrade opts=~w\n", 
+	    ?debug("after upgrade opts=~w\n", 
 		 [getopts(X, [active,packet,mode])]),
 	    {ok,X}
     end.
@@ -305,44 +308,44 @@ accept_probe_ssl(X=#xylan_socket { mdata=M, socket=S,
 				 tags = {TData,TClose,TError}},
 		 Protos,
 		 Timeout) ->
-    lager:debug("accept_probe_ssl protos=~w\n", [Protos]),
+    ?debug("accept_probe_ssl protos=~w\n", [Protos]),
     setopts(X, [{active,once}]),
     receive
 	{TData, S, Data} ->
-	    lager:debug("Accept data=~w\n", [Data]),
+	    ?debug("Accept data=~w\n", [Data]),
 	    case request_type(Data) of
 		ssl ->
-		    lager:debug("request type: ssl\n",[]),
+		    ?debug("request type: ssl\n",[]),
 		    ok = M:unrecv(S, Data),
-		    lager:debug("~w:unrecv(~w, ~w)\n", [M,S,Data]),
+		    ?debug("~w:unrecv(~w, ~w)\n", [M,S,Data]),
 		    %% insert ssl after transport
 		    Protos1 = X#xylan_socket.protocol--([probe_ssl|Protos]),
 		    Protos2 = Protos1 ++ [ssl|Protos],
 		    accept_upgrade(X#xylan_socket{protocol=Protos2},
 				   [ssl|Protos],Timeout);
 		_ -> %% not ssl
-		    lager:debug("request type: NOT ssl\n",[]),
+		    ?debug("request type: NOT ssl\n",[]),
 		    ok = M:unrecv(S, Data),
-		    lager:debug("~w:unrecv(~w, ~w)\n", [M,S,Data]),
+		    ?debug("~w:unrecv(~w, ~w)\n", [M,S,Data]),
 		    accept_upgrade(X,Protos,Timeout)
 	    end;
 	{TClose, S} ->
-	    lager:debug("closed\n", []),
+	    ?debug("closed\n", []),
 	    {error, closed};
 	{TError, S, Error} ->
-	    lager:warning("error ~w\n", [Error]),
+	    ?warning("error ~w\n", [Error]),
 	    Error
     end.
 
-ssl_accept(Socket, Options, Timeout) ->    
-    case ssl:ssl_accept(Socket, Options, Timeout) of
-	{error, ssl_not_started} ->
-	    ssl:start(),
-	    ssl:ssl_accept(Socket, Options, Timeout);
+%% Since OTP 21
+handshake(Socket, Options, Timeout) -> 
+    try ssl:handshake(Socket, Options, Timeout) of
 	Result ->
 	    Result
+    catch
+	error:undef ->
+	    ssl:ssl_accept(Socket, Options, Timeout)
     end.
-
 
 request_type(<<"GET", _/binary>>) ->    http;
 request_type(<<"POST", _/binary>>) ->    http;

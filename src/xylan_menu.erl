@@ -28,13 +28,15 @@
 
 -export([spec/0, example/0, menu/0]).
 
+-include("xylan_log.hrl").
+
 menu() ->
     Spec = spec(),
     Config = example(),
     %% Validate start spec
     hex:validate_flags(Config, Spec),
     Db = load(Config, []),
-    lager:debug("menu: db ~p", Db),
+    ?debug("menu: db ~p", Db),
     Output = fun(Key) ->
 		     io:format("~p~n",[Key])
 	     end,
@@ -75,7 +77,7 @@ menu([], Spec, Db, _Output, Input) ->
 	_ -> scan_input(Choice, Spec, Db)
     end;
 menu([{key, Key, _TS} | List], Spec, Db, Output, Input) ->
-    lager:debug("menu: key ~p ignored.",[Key]),
+    ?debug("menu: key ~p ignored.",[Key]),
     menu(List, Spec, Db, Output, Input);
 menu([{_Type, Key, _TS} | List], Spec, Db, Output, Input) ->
     Output(Key),
@@ -90,7 +92,7 @@ scan_input(Choice, Spec, Db) ->
     end.
 
 search_spec(Key, Value, Spec, Db) ->
-    lager:debug("search_spec: ~p = ~p, ~p, ~p", [Key, Value, Spec, Db]),
+    ?debug("search_spec: ~p = ~p, ~p, ~p", [Key, Value, Spec, Db]),
     case lists:keyfind(Key, 2, Spec) of
 	{leaf, Key, TS} -> verify_ts(Key, Value, TS, Spec, Db);
 	{key, Key, []} = KeyPost -> search_spec(Key, Value, lists:delete(KeyPost, Spec), Db);
@@ -115,7 +117,7 @@ verify_ts(Key, Value, [{type, UInt, _}], Spec, Db) when UInt =:= uint32;
     end.
 	    
 change_config(Key, Value, Spec, Db) ->
-    lager:debug("change_config: ~p = ~p", [Key,Value]),
+    ?debug("change_config: ~p = ~p", [Key,Value]),
     {continue, Spec, Db}. 
 			       
 	    

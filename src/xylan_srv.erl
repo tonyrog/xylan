@@ -55,6 +55,7 @@
 	   element(3,(IP)) bor element(4,(IP))) band (bnot 16#ff)) =:= 0)).
 -define(is_port(Port), (((Port) band (bnot 16#ffff)) =:= 0)).
 
+-include("xylan_log.hrl").
 -include("xylan_socket.hrl").
 
 
@@ -239,7 +240,7 @@ start_client_data(Port) ->
 start_user(Ports) when is_list(Ports) ->
     lists:foldl(
       fun({Name,IP,Port},Acc) when is_atom(Name), is_integer(Port) ->
-	      lager:info("open user port ~s ~w @ ~w\n", 
+	      ?info("open user port ~s ~w @ ~w\n", 
 			 [Name,Port,IP]),
 	      open_user_port(Port,IP) ++ Acc
       end, [], Ports).
@@ -254,7 +255,7 @@ open_user_port(Port,IP) when is_integer(Port) ->
 	    {ok,Ref} = xylan_socket:async_accept(Socket),
 	    [{Socket,Ref}];
 	Error ->
-	    lager:warning("Error listen to port ~w:~p ~p",[Port,IP,Error]),
+	    ?warning("Error listen to port ~w:~p ~p",[Port,IP,Error]),
 	    []
     end.
 
@@ -283,7 +284,7 @@ handle_call({config_change,_Changed,_New,_Removed},_From,State) ->
     {reply, ok, State};
     
 handle_call(_Request, _From, State) ->
-    lager:warning("got unknown request ~p\n", [_Request]),
+    ?warning("got unknown request ~p\n", [_Request]),
     {reply, {error, bad_call}, State}.
 
 %%--------------------------------------------------------------------
@@ -301,10 +302,10 @@ handle_cast(Msg={route,SessionKey,RouteInfo,Proxy}, State) ->
     %% user session got some data, try to route to a client
     %% by some rule, current rule is to take first client
     %% fixme: verify user ?  yes!
-    lager:debug("got route : ~p", [Msg]),
+    ?debug("got route : ~p", [Msg]),
     case route_cs(State#state.clients, RouteInfo) of
 	false ->
-	    lager:warning("failed to route ~p", [RouteInfo]),
+	    ?warning("failed to route ~p", [RouteInfo]),
 	    {noreply, State};
 	{ok,Client} when is_pid(Client#client.pid) ->
 	    gen_server:cast(Client#client.pid,
@@ -316,11 +317,11 @@ handle_cast(Msg={route,SessionKey,RouteInfo,Proxy}, State) ->
 			     Client#client.b_socket_options}),
 	    {noreply, State};
 	{ok,Client} ->
-	    lager:warning("client ~s not connected",[Client#client.id]),
+	    ?warning("client ~s not connected",[Client#client.id]),
 	    {noreply, State}
     end;
 handle_cast(_Msg, State) ->
-    lager:warning("got unknown message ~p\n", [_Msg]),
+    ?warning("got unknown message ~p\n", [_Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -339,12 +340,12 @@ handle_cast(_Msg, State) ->
 handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
     if
 	Listen =:= (State#state.cntl_sock)#xylan_socket.socket, Ref =:= State#state.cntl_ref ->
-	    lager:debug("(client control) ~p", [_Msg]),
+	    ?debug("(client control) ~p", [_Msg]),
 	    {ok,Ref1} = xylan_socket:async_accept(State#state.cntl_sock),
 	    case xylan_socket:async_socket(State#state.cntl_sock, Socket) of
 		{ok, XSocket} ->
 		    {ok,{SrcIP,SrcPort}} = xylan_socket:peername(XSocket),
-		    lager:info("client connected from ~p:~p\n", 
+		    ?info("client connected from ~p:~p\n", 
 			       [inet:ntoa(SrcIP),SrcPort]),
 		    xylan_socket:setopts(XSocket, [{active,once}]),
 		    Timeout = State#state.auth_timeout,
@@ -352,11 +353,11 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    Ls = [{XSocket,TRef}|State#state.auth_list],
 		    {noreply, State#state { auth_list=Ls, cntl_ref = Ref1 }};
 		_Error ->
-		    lager:error("inet_accept: ~p", [_Error]),
+		    ?error("inet_accept: ~p", [_Error]),
 		    {noreply, State#state { cntl_ref=Ref1}}
 	    end;
 	Listen =:= (State#state.data_sock)#xylan_socket.socket, Ref =:= State#state.data_ref ->
-	    lager:debug("(client data) ~p", [_Msg]),
+	    ?debug("(client data) ~p", [_Msg]),
 	    {ok,Ref1} = xylan_socket:async_accept(State#state.data_sock),
 	    case xylan_socket:async_socket(State#state.data_sock, Socket) of
 		{ok, XSocket} ->
@@ -368,14 +369,14 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    Ls = [{XSocket,TRef}|State#state.data_list],
 		    {noreply, State#state { data_list = Ls, data_ref=Ref1}};
 		_Error ->
-		    lager:error("~p", [_Error]),
+		    ?error("~p", [_Error]),
 		    {noreply, State#state { data_ref=Ref1}}
 	    end;
 	true ->
-	    lager:debug("(user connect) ~p", [_Msg]),
+	    ?debug("(user connect) ~p", [_Msg]),
 	    case lists:keytake(Ref, 2, State#state.user_socks) of
 		false ->
-		    lager:error("listen socket not found"),
+		    ?error("listen socket not found"),
 		    {noreply, State};
 		{value,{UserSock,Ref},UserSocks} ->
 		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
@@ -392,12 +393,12 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 				    {noreply, State#state { proxy_list = Ls,
 							    user_socks=UsersSocks1}};
 				_Error ->
-				    lager:error("inet_accept: (user) ~p", [_Error]),
+				    ?error("inet_accept: (user) ~p", [_Error]),
 				    xylan_socket:close(XSocket),
 				    {noreply, State#state { user_socks=UsersSocks1}}
 			    end;
 			_Error ->
-			    lager:error("inet_accept: (user) ~p", [_Error]),
+			    ?error("inet_accept: (user) ~p", [_Error]),
 			    {noreply, State#state { user_socks=UsersSocks1}}
 		    end
 	    end
@@ -406,12 +407,12 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 %% client data message
 handle_info(_Info={Tag,Socket,Data}, State) when
       (Tag =:= tcp orelse Tag =:= ssl) ->
-    lager:debug("(data channel) ~p", [_Info]),
+    ?debug("(data channel) ~p", [_Info]),
     case take_socket(Socket, 1, State#state.data_list) of
 	false ->
 	    case take_socket(Socket, 1, State#state.auth_list) of
 		false ->
-		    lager:warning("socket not found, data=~p",[Data]),
+		    ?warning("socket not found, data=~p",[Data]),
 		    %% FIXME: close this?
 		    {noreply, State};
 		{value,{XSocket,TRef},AuthList} ->
@@ -421,27 +422,27 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 			Message = {auth_req,[{id,ID},{chal,_Chal}]} ->
 			    case lists:keyfind(ID, #client.id, State#state.clients) of
 				false ->
-				    lager:warning("client ~p not found",[ID]),
+				    ?warning("client ~p not found",[ID]),
 				    xylan_socket:close(XSocket),
 				    {noreply, State#state { auth_list = AuthList }};
 				Client when is_pid(Client#client.pid) ->
-				    lager:info("client ~p connected\n", [ID]),
+				    ?info("client ~p connected\n", [ID]),
 				    xylan_socket:controlling_process(XSocket, Client#client.pid),
 				    gen_server:cast(Client#client.pid, {set_socket, XSocket}),
 				    gen_server:cast(Client#client.pid, Message),
 				    {noreply, State#state { auth_list = AuthList }};
 				_Client ->
-				    lager:warning("client pid not present", [ID]),
+				    ?warning("client ~p pid not present", [ID]),
 				    xylan_socket:close(XSocket),
 				    {noreply, State#state { auth_list = AuthList }}
 			    end;
 			Other ->
-			    lager:warning("bad client message=~p",[Other]),
+			    ?warning("bad client message=~p",[Other]),
 			    xylan_socket:close(XSocket),
 			    {noreply, State#state { auth_list = AuthList }}
 		    catch
 			error:Reason ->
-			    lager:warning("bad client message=~p",[{error,Reason}]),
+			    ?warning("bad client message=~p",[{error,Reason}]),
 			    xylan_socket:close(XSocket),
 			    {noreply, State#state { auth_list = AuthList }}
 		    end
@@ -452,7 +453,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 	    %% data packet <<SessionKey:16>>
 	    case lists:keytake(Data,3,State#state.proxy_list) of
 		false ->
-		    lager:warning("no user found id=~p",[Data]),
+		    ?warning("no user found id=~p",[Data]),
 		    xylan_socket:close(XSocket),
 		    {noreply, State#state { data_list=Ls }};
 
@@ -467,22 +468,22 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 %% client data socket closed before proxy connection is established
 handle_info(_Info={Tag,Socket}, State) when
       (Tag =:= tcp_closed orelse Tag =:= ssl_closed) ->
-    lager:debug("(data channel) ~p", [_Info]),
+    ?debug("(data channel) ~p", [_Info]),
     {noreply, close_socket(Socket, State)};
 
 %% data socket got error before proxy established
 handle_info(_Info={Tag,Socket,_Error}, State) when 
       (Tag =:= tcp_error orelse Tag =:= ssl_error) ->
-    lager:debug("(data channel) ~p", [_Info]),
+    ?debug("(data channel) ~p", [_Info]),
     {noreply, close_socket(Socket, State)};
 
 handle_info({timeout,TRef,auth_timeout}, State) ->
     case lists:keytake(TRef,2,State#state.auth_list) of
 	false ->
-	    lager:debug("auth_timeout already removed"),
+	    ?debug("auth_timeout already removed"),
 	    {noreply, State};
 	{value,{Socket,TRef},Ls} ->
-	    lager:info("auth_timeout"),
+	    ?info("auth_timeout"),
 	    xylan_socket:close(Socket),
 	    {noreply, State#state { auth_list = Ls}}
     end;
@@ -490,26 +491,26 @@ handle_info({timeout,TRef,auth_timeout}, State) ->
 handle_info({timeout,TRef,data_timeout}, State) ->
     case lists:keytake(TRef,2,State#state.data_list) of
 	false ->
-	    lager:debug("data_timeout already removed"),
+	    ?debug("data_timeout already removed"),
 	    {noreply, State};
 	{value,{Socket,TRef},Ls} ->
-	    lager:info("data_timeout"),
+	    ?info("data_timeout"),
 	    xylan_socket:close(Socket),
 	    {noreply, State#state { data_list = Ls}}
     end;
 
 handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) ->
-    lager:debug("got: ~p\n", [_Info]),
+    ?debug("got: ~p\n", [_Info]),
     case lists:keytake(Ref, 2, State#state.proxy_list) of
 	{value,_Proxy,Ls} ->
-	    lager:debug("proxy stopped ~p\n", [_Reason]),
+	    ?debug("proxy stopped ~p\n", [_Reason]),
 	    {noreply, State#state { proxy_list = Ls}};
 	false ->
 	    case lists:keytake(Ref, #client.mon, State#state.clients) of
 		false ->
 		    {noreply, State};
 		{value,C,Clients} ->
-		    lager:debug("client stopped ~p restart client ~s", [_Reason,C#client.id]),
+		    ?debug("client stopped ~p restart client ~s", [_Reason,C#client.id]),
 		    {ok,CPid} = xylan_session:start(),
 		    CMon = erlang:monitor(process, CPid),
 		    Clients1 = [C#client { pid = CPid,mon = CMon } | Clients],
@@ -525,7 +526,7 @@ handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) ->
 	    end
     end;
 handle_info(_Info, State) ->
-    lager:warning("got unknown info ~p\n", [_Info]),
+    ?warning("got unknown info ~p\n", [_Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -578,7 +579,7 @@ validate_key(KeyType,Key) ->
 	BinKey -> BinKey
     catch
 	error:_ ->
-	    lager:error("~s key format error\n", [KeyType]),
+	    ?error("~s key format error\n", [KeyType]),
 	    erlang:error(bad_key_format)
     end.
 
@@ -606,7 +607,7 @@ validate_re(RE) when is_list(RE); is_binary(RE) ->
     case re:compile(RE) of
 	{ok,_Comp} -> RE;  %% may return Comp!!!
 	{error,{Error,_}} ->
-	    lager:error("bad regular expression ~s ~s\n",
+	    ?error("bad regular expression ~s ~s\n",
 			[RE, Error]),
 	    erlang:error(bad_re_expr)
     end.
@@ -619,12 +620,12 @@ validate_ip(IPorIFName) when is_list(IPorIFName) ->
     case re:compile(IPorIFName) of
 	{ok,_Comp} -> IPorIFName;
 	{error,{Error,_}} ->
-	    lager:error("bad regular expression ~s ~s\n",
+	    ?error("bad regular expression ~s ~s\n",
 			[IPorIFName, Error]),
 	    erlang:error(bad_re_expr)
     end;
 validate_ip(_IP) ->
-    lager:error("bad ip name ~p\n", [_IP]),
+    ?error("bad ip name ~p\n", [_IP]),
     erlang:error(bad_ip).
 
 validate_listen_ports(Ps) when is_list(Ps) ->
@@ -639,7 +640,7 @@ validate_listen_port({any,Port}) when ?is_port(Port) ->
 validate_listen_port({IfName,Port}) when ?is_port(Port) ->
     case xylan_lib:lookup_ip(IfName,inet) of
 	{error,_} ->
-	    lager:warning("No such interface ~p",[IfName]),
+	    ?warning("No such interface ~p",[IfName]),
 	    erlang:error(bad_interface);
 	{ok,IP} ->
 	    {undefined,IP,Port}
@@ -647,7 +648,7 @@ validate_listen_port({IfName,Port}) when ?is_port(Port) ->
 validate_listen_port({Name,IfName,Port}) when is_atom(Name),?is_port(Port) ->
     case xylan_lib:lookup_ip(IfName,inet) of
 	{error,_} ->
-	    lager:warning("No such interface ~p",[Name]),
+	    ?warning("No such interface ~p",[Name]),
 	    erlang:error(bad_interface);
 	{ok,IP} ->
 	    {Name,IP,Port}
@@ -660,14 +661,14 @@ validate_port(PortRE,_UserPort) when is_list(PortRE) ->
     case re:compile(PortRE) of
 	{ok,_Comp} -> PortRE;
 	{error,{Error,_}} ->
-	    lager:error("bad regular expression ~s ~s\n",
+	    ?error("bad regular expression ~s ~s\n",
 			[PortRE, Error]),
 	    erlang:error(bad_re_expr)
     end;
 validate_port(Port,UserPort) when is_atom(Port) ->
     case lists:keyfind(Port,1,UserPort) of
 	false ->
-	    lager:error("port name ~s not declared", [Port]),
+	    ?error("port name ~s not declared", [Port]),
 	    erlang:error(bad_port);
 	{_PortName,IfName,PortNum} -> {IfName,PortNum}
     end.
@@ -687,7 +688,7 @@ load_client_configs(Args) ->
 		    lists:append([xylan_lib:load_config(Dir,File) || 
 				     File <- Files]);
 		{error,Reason} ->
-		    lager:error("unable to list client configs dir ~s ~p",
+		    ?error("unable to list client configs dir ~s ~p",
 				[Dir, Reason]),
 		    []
 	    end
@@ -704,13 +705,13 @@ close_socket(Socket, State) ->
 		false ->
 		    State;
 		{value,{Socket,TRef},Ls} ->
-		    lager:debug("close client socket"),
+		    ?debug("close client socket"),
 		    cancel_timer(TRef),
 		    xylan_socket:close(Socket),
 		    State#state { auth_list = Ls }
 	    end;
 	{value,{Socket,TRef},Ls} ->
-	    lager:debug("close data socket"),
+	    ?debug("close data socket"),
 	    cancel_timer(TRef),
 	    xylan_socket:close(Socket),
 	    State#state { data_list = Ls }
@@ -788,7 +789,7 @@ match([{src_port,RE}|R], RouteInfo) ->
 	_ -> false
     end;
 match([M|_R], _RouteInfo) ->
-    lager:warning("unknown route match ~p", [M]),
+    ?warning("unknown route match ~p", [M]),
     false;
 match([], _RouteInfo) ->
     true.

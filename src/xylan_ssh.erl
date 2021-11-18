@@ -33,6 +33,8 @@
 	 handle_msg/2, 
 	 terminate/2]).
 
+-include("xylan_log.hrl").
+
 -record(pty, {term = "",
 	      width = 80,
 	      height = 25,
@@ -76,7 +78,7 @@ handle_ssh_msg({ssh_cm, ConRef,
 		{pty, Channel, WantReply, 
 		 {TermName, Width, Height, PixWidth, PixHeight, Opts}}} = _Msg, 
 	       #loopdata{host = undefined} = LD0) ->
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     LD = LD0#loopdata{pty = #pty{term = TermName,
 				 width =  Width,
 				 height = Height,
@@ -90,7 +92,7 @@ handle_ssh_msg({ssh_cm, ConRef,
 		{pty, Channel, WantReply, 
 		 {TermName, Width, Height, PixWidth, PixHeight, Opts}}} = _Msg, 
 	       LD0) ->
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     LD = LD0#loopdata{pty = #pty{term = TermName,
 				 width =  Width,
 				 height = Height,
@@ -104,12 +106,12 @@ handle_ssh_msg({ssh_cm, ConRef,
 handle_ssh_msg({ssh_cm, ConRef, 
 		{env, Channel, WantReply, _Var, _Value}} = _Msg, 
 	       LD) ->
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     ssh_connection:reply_request(ConRef, WantReply, failure, Channel),
     {ok, LD};
 
 handle_ssh_msg({ssh_cm, ConRef, {shell, Channel, WantReply}} = _Msg, LD) ->
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     Clients = menu(Channel, ConRef),
     ssh_connection:reply_request(ConRef, WantReply, success, Channel),
     {ok, LD#loopdata{us_channel = Channel,
@@ -120,9 +122,9 @@ handle_ssh_msg({ssh_cm, USConRef, {data, USChannel, _Type, Data}} = _Msg,
 	       #loopdata{host = undefined, buf = Buf, clients = Clients} = LD) ->
     %% Before a client side has been set up data is used to
     %% get a host name.
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     List = binary_to_list(Data),
-    lager:debug("data ~p", [List]),
+    ?debug("data ~p", [List]),
     case detect_host(lists:append(Buf, List), 
 		     Clients, USChannel, USConRef) of 
 	{exit, _} ->
@@ -142,7 +144,7 @@ handle_ssh_msg({ssh_cm, USConRef, {data, USChannel, _Type, Data}},
 	       #loopdata{buf = "",  %% No old data
 			 us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel} = LD) ->
-    lager:debug("data from user side ~p", [Data]),
+    ?debug("data from user side ~p", [Data]),
     %% Send on to client side
     send(Data, CSChannel, CSConRef),
     {ok, LD};
@@ -151,7 +153,7 @@ handle_ssh_msg({ssh_cm, USConRef, {data, USChannel, _Type, Data}},
 	       #loopdata{buf = Buf, 
 			 us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel} = LD) ->
-    lager:debug("data from user side ~p", [Data]),
+    ?debug("data from user side ~p", [Data]),
     %% Old data first
     send(Buf, CSChannel, CSConRef),
     %% Send on to client side
@@ -161,7 +163,7 @@ handle_ssh_msg({ssh_cm, USConRef, {data, USChannel, _Type, Data}},
 handle_ssh_msg({ssh_cm, CSConRef, {data, CSChannel, _Type, Data}}, 
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel} = LD) ->
-    lager:debug("data from client side ~p", [Data]),
+    ?debug("data from client side ~p", [Data]),
     %% Send on to user side
     send(Data, USChannel, USConRef),
     {ok, LD};
@@ -171,7 +173,7 @@ handle_ssh_msg({ssh_cm, USConRef,
 		 USChannel, Width, Height, PixWidth, PixHeight}} = _Msg, 
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = _CSConRef, cs_channel = _CSChannel} = LD0) ->
-    lager:debug("window_change from user side ~p", [_Msg]),
+    ?debug("window_change from user side ~p", [_Msg]),
     %% Send on to client side ??
     LD = LD0#loopdata{pty = #pty{width =  Width,
 				 height = Height,
@@ -180,14 +182,14 @@ handle_ssh_msg({ssh_cm, USConRef,
     {ok, LD};
 
 handle_ssh_msg({ssh_cm, _ConRef, {eof, _Channel}}, LD) ->
-    lager:debug("eof", []),
+    ?debug("eof", []),
     {ok, LD};
 
 handle_ssh_msg({ssh_cm, _ConRef, {closed, Channel}}, 
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel,
 			 up = 1} = LD) ->
-    lager:debug("last side closed", []),
+    ?debug("last side closed", []),
     ssh_connection:close(USConRef, USChannel),
     ssh_connection:close(CSConRef, CSChannel),
     %%ssh:close(USConRef),
@@ -198,9 +200,9 @@ handle_ssh_msg({ssh_cm, CSConRef, {closed, CSChannel}},
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel,
 			 clients = _Clients} = LD) ->
-    lager:debug("client side closed", []),
+    ?debug("client side closed", []),
     %%ssh_connection:send_eof(USConRef, USChannel),
-    lager:debug("pid: ~p", [self()]),
+    ?debug("pid: ~p", [self()]),
     ssh_connection:close(USConRef, USChannel),
     %%list_clients(Clients, USChannel, USConRef),
     {ok, LD#loopdata {up = 1, host = undefined}};
@@ -208,14 +210,14 @@ handle_ssh_msg({ssh_cm, CSConRef, {closed, CSChannel}},
 handle_ssh_msg({ssh_cm, USConRef, {closed, USChannel}},
 	       #loopdata{us_conref = USConRef, us_channel = USChannel,
 			 cs_conref = CSConRef, cs_channel = CSChannel} = LD) ->
-    lager:debug("user side closed", []),
+    ?debug("user side closed", []),
     %%ssh_connection:send_eof(CSConRef, CSChannel),
     ssh_connection:close(CSConRef, CSChannel),
     {ok, LD#loopdata {up = 1}};
 
 handle_ssh_msg({ssh_cm, _, {signal, _, _}}, LD) ->
     %% Ignore signals according to RFC 4254 section 6.9.
-    lager:debug("signal", []),
+    ?debug("signal", []),
     {ok, LD};
 
 handle_ssh_msg({ssh_cm, _, {exit_signal, Channel, _, Error, _}}, LD) ->
@@ -225,7 +227,7 @@ handle_ssh_msg({ssh_cm, _, {exit_signal, Channel, _, Error, _}}, LD) ->
     {stop, Channel,  LD};
 
 handle_ssh_msg({ssh_cm, _, {exit_status, Channel, 0}}, LD) ->
-    lager:debug("exit_status 0", []),
+    ?debug("exit_status 0", []),
     {stop, Channel, LD};
 
 handle_ssh_msg({ssh_cm, _, {exit_status, Channel, Status}}, LD) ->
@@ -236,7 +238,7 @@ handle_ssh_msg({ssh_cm, _, {exit_status, Channel, Status}}, LD) ->
     {stop, Channel, LD};
 
 handle_ssh_msg(_Msg, LD) ->
-    lager:debug("unknown msg ~p", [_Msg]),
+    ?debug("unknown msg ~p", [_Msg]),
     {ok, LD}.
 
 %%--------------------------------------------------------------------
@@ -245,16 +247,16 @@ handle_ssh_msg(_Msg, LD) ->
 %% Description: Handles other channel messages.
 %%--------------------------------------------------------------------
 handle_msg({ssh_channel_up, _Channel, _ConRef} = _Msg, LD) ->
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     handle_channel_up(),
     {ok, LD};
 
 handle_msg(xylan_dummy_up = _Msg, LD) ->
-    lager:debug("~p", [_Msg]),
+    ?debug("~p", [_Msg]),
     {ok, LD};
 
 handle_msg(_Msg, LD) ->
-    lager:debug("unknown msg ~p", [_Msg]),
+    ?debug("unknown msg ~p", [_Msg]),
     {ok, LD}.
 
 
@@ -263,7 +265,7 @@ handle_msg(_Msg, LD) ->
 %% Description: Called when the channel process is trminated
 %%--------------------------------------------------------------------
 terminate(_Reason, _LD) ->
-   lager:debug("~p", [_Reason]),
+   ?debug("~p", [_Reason]),
     ok.
 
 
@@ -281,13 +283,13 @@ menu(Channel, ConRef) ->
 	    list_clients(NumClients, Channel, ConRef),
 	    NumClients;
 	_ ->
-	    lager:debug("no clients found,", []),
+	    ?debug("no clients found,", []),
 	    []
     end.
 	
 
 list_clients(Clients, Channel, ConRef) ->
-    lager:debug("~p,", [Clients]),
+    ?debug("~p,", [Clients]),
     Msg = [lists:foldl(
 	     fun({Num, Client}, Acc) ->
 		     [io_lib:format("~p - ~s\r\n", [Num, Client]) | Acc]
@@ -296,17 +298,17 @@ list_clients(Clients, Channel, ConRef) ->
     ssh_connection:send(ConRef, Channel, 0, Msg).
    
 complete_row(Buf) ->
-    lager:debug("buffer ~s,", [Buf]),
+    ?debug("buffer ~s,", [Buf]),
     case string:chr(Buf,$\r) of
 	0 -> 
 	    {undefined, Buf};
 	Pos ->
 	    case lists:split(Pos - 1, Buf) of
 		{Host, [$\r]} ->
-		    lager:debug("host ~s.", [Host]),
+		    ?debug("host ~s.", [Host]),
 		    {Host, []};
 		{Host, [$\r, Rest]} ->
-		    lager:debug("host ~s.", [Host]),
+		    ?debug("host ~s.", [Host]),
 		    {Host, Rest}
 	    end
     end.

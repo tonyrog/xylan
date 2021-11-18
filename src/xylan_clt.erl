@@ -56,6 +56,7 @@
 -define(DEFAULT_RECONNECT_INTERVAL, 5000).
 -define(DEFAULT_AUTH_TIMEOUT, 3000).
 
+-include("xylan_log.hrl").
 -include("xylan_socket.hrl").
 
 -record(state,
@@ -275,10 +276,10 @@ handle_info(_Info={Tag,Socket,Data}, State) when
     try binary_to_term(Data, [safe]) of
 	_Mesg={auth_res,[{id,ServerName},{chal,Chal},{cred,Cred}]} -> 
 	    %% auth and cred from server
-	    lager:debug("auth_res: ~p ok", [_Mesg]),
+	    ?debug("auth_res: ~p ok", [_Mesg]),
 	    case crypto:hash(sha,[State#state.server_key,State#state.server_chal]) of
 		Cred ->
-		    lager:debug("credential from server ~p ok", [ServerName]),
+		    ?debug("credential from server ~p ok", [ServerName]),
 		    cancel_timer(State#state.auth_timer),
 		    Cred1 = crypto:hash(sha,[State#state.client_key,Chal]),
 		    send(State#state.server_sock, 
@@ -289,7 +290,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 					    auth_timer = undefined,
 					    ping_timer = PingTimer }};
 		_CredFail ->
-		    lager:debug("credential failed"),
+		    ?debug("credential failed"),
 		    close(State#state.server_sock),
 		    TRef = reconnect_after(State#state.reconnect_interval),
 		    {noreply, State#state { server_sock=undefined, 
@@ -297,11 +298,11 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 					    reconnect_timer=TRef }}
 	    end;
 	_Mesg ->
-	    lager:warning("(control channel) unkown ~p", [_Mesg]),
+	    ?warning("(control channel) unkown ~p", [_Mesg]),
 	    {noreply, State}
     catch
 	error:Reason ->
-	    lager:error("~p", [Reason]),
+	    ?error("~p", [Reason]),
 	    {noreply, State}
     end;
 
@@ -312,7 +313,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
     xylan_socket:setopts(State#state.server_sock, [{active, once}]),
     try binary_to_term(Data, [safe]) of
 	pong when State#state.ping_timer =:= undefined ->
-	    lager:debug("(control channel) pong"),
+	    ?debug("(control channel) pong"),
 	    cancel_timer(State#state.pong_timer),
 	    Ping = start_timer(State#state.ping_interval, ping),
 	    PongTime = os:timestamp(),
@@ -320,17 +321,17 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 				    pong_time = PongTime,
 				    ping_timer = Ping }};
 	pong ->
-	    lager:debug("(control channel) spourius pong", []),
+	    ?debug("(control channel) spourius pong", []),
 	    {noreply, State};
 	    
 	Route={route,DataPort,SessionKey,RouteInfo} ->
-	    lager:debug("(control channel) route ~p", [Route]),
+	    ?debug("(control channel) route ~p", [Route]),
 	    case route(State#state.route,RouteInfo) of
 		{ok,{LocalIP,LocalPort}} ->
 		    RemoteIP = State#state.server_ip,
-		    lager:debug("connect to server ~p:~p\n", 
+		    ?debug("connect to server ~p:~p\n", 
 				[RemoteIP,DataPort]),
-		    lager:debug("connect to local  ~p:~p\n", 
+		    ?debug("connect to local  ~p:~p\n", 
 				[LocalIP,LocalPort]),
 		    case xylan_proxy:start(SessionKey) of
 			{ok,Pid} ->
@@ -342,15 +343,15 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 		    end,
 		    {noreply, State};
 		false ->
-		    lager:warning("failed to route ~p", [RouteInfo]),
+		    ?warning("failed to route ~p", [RouteInfo]),
 		    {noreply, State}
 	    end;
 	_Message ->
-	    lager:warning("(control channel) unkown ~p", [_Message]),
+	    ?warning("(control channel) unkown ~p", [_Message]),
 	    {noreply, State}
     catch
 	error:Reason ->
-	    lager:error("~p", [Reason]),
+	    ?error("~p", [Reason]),
 	    {noreply, State}
     end;
 
@@ -358,7 +359,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 handle_info(_Info={Tag,Socket}, State) when
       Tag =:= State#state.tag_closed,
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
-    lager:debug("(control channel) ~p", [_Info]),
+    ?debug("(control channel) ~p", [_Info]),
     State1 = close_server(State),
     Timer = reconnect_after(State1#state.reconnect_interval),
     {noreply, State1#state { reconnect_timer=Timer }};
@@ -367,7 +368,7 @@ handle_info(_Info={Tag,Socket}, State) when
 handle_info(_Info={Tag,Socket,_Error}, State) when 
       Tag =:= State#state.tag_error,
       Socket =:= (State#state.server_sock)#xylan_socket.socket ->
-    lager:debug("(data channel) ~p", [_Info]),
+    ?debug("(data channel) ~p", [_Info]),
     State1 = close_server(State),
     Timer = reconnect_after(State1#state.reconnect_interval),
     {noreply, State1#state { reconnect_timer=Timer }};
@@ -381,34 +382,34 @@ handle_info(reconnect, State) when State#state.server_sock =:= undefined ->
 
 handle_info({timeout,T,ping}, State) when T =:= State#state.ping_timer ->
     if State#state.server_sock =/= undefined ->
-	    lager:debug("ping timeout send ping"),
+	    ?debug("ping timeout send ping"),
 	    send(State#state.server_sock, ping),
 	    Timer = start_timer(State#state.pong_timeout, pong),
 	    {noreply, State#state { ping_timer=undefined, pong_timer=Timer}};
        true ->
-	    lager:debug("old ping timeout?"),
+	    ?debug("old ping timeout?"),
 	    {noreply, State}
     end;
 
 handle_info({timeout,T,pong}, State) when T =:= State#state.pong_timer ->
     if State#state.server_sock =/= undefined ->
-	    lager:debug("pong timeout reconnect socket"),
+	    ?debug("pong timeout reconnect socket"),
 	    State1 = close_server(State),
 	    Timer = reconnect_after(State1#state.reconnect_interval),
 	    {noreply, State1#state { reconnect_timer=Timer }};
        true ->
-	    lager:debug("old pong timeout?"),
+	    ?debug("old pong timeout?"),
 	    {noreply, State}
     end;
 
 handle_info({timeout,T,auth_timeout}, State) when T=:=State#state.auth_timer ->
-    lager:debug("auth timeout, reconnect"),
+    ?debug("auth timeout, reconnect"),
     State1 = close_server(State),
     Timer = reconnect_after(State1#state.reconnect_interval),
     {noreply, State1#state { reconnect_timer=Timer }};
 
 handle_info(_Info, State) ->
-    lager:warning("got: ~p\n", [_Info]),
+    ?warning("got: ~p\n", [_Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -460,7 +461,7 @@ load_server_configs() ->
 		    lists:append([xylan_lib:load_config(Dir,File) || 
 				     File <- Files]);
 		{error,Reason} ->
-		    lager:error("unable to list server configs dir ~s ~p",
+		    ?error("unable to list server configs dir ~s ~p",
 				[Dir, Reason]),
 		    []
 	    end;
@@ -478,7 +479,7 @@ connect_server(State) ->
 			      [{mode,binary},{packet,4},{nodelay,true}],
 			      3000) of
 	{ok, Socket} ->
-	    lager:debug("server ~p:~p connected",
+	    ?debug("server ~p:~p connected",
 			[State#state.server_ip,State#state.server_port]),
 	    %% Chal = crypto:rand_bytes(16),
 	    Chal = crypto:strong_rand_bytes(16),  %% generate challenge
@@ -493,7 +494,7 @@ connect_server(State) ->
 			  session_time = os:timestamp(),
 			  tag=T, tag_closed=C, tag_error=E };
 	Error ->
-	    lager:warning("server not connected, ~p", [Error]),
+	    ?warning("server not connected, ~p", [Error]),
 	    Timer = reconnect_after(State#state.reconnect_interval),
 	    State#state { reconnect_timer=Timer }
     end.
@@ -536,7 +537,7 @@ route([{R,L}|Rs], RouteInfo) ->
 	true ->
 	    case proplists:get_value(port,L) of
 		undefined ->
-		    lager:warning("route has not target port, ignored"),
+		    ?warning("route has not target port, ignored"),
 		    false;
 		Port when is_list(Port) ->
 		    {ok,{unix,Port}};
@@ -549,7 +550,7 @@ route([{R,L}|Rs], RouteInfo) ->
 				{ok,IP} ->
 				    {ok,{IP,Port}};
 				Error ->
-				    lager:warning("ip ~p is not found: ~p", 
+				    ?warning("ip ~p is not found: ~p", 
 						  [Name,Error]),
 				    false
 			    end
@@ -601,7 +602,7 @@ match([{src_port,RE}|R], RouteInfo) ->
 	_ -> false
     end;
 match([M|_R], _RouteInfo) ->
-    lager:warning("unknown route match ~p", [M]),
+    ?warning("unknown route match ~p", [M]),
     false;
 match([], _RouteInfo) ->
     true.

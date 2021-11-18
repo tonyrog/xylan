@@ -31,7 +31,6 @@
 -export([generate_key/0]).
 
 start() ->
-    lager:start(),
     ssl:start(),
     application:start(afunix),
     application:start(xylan).

@@ -40,6 +40,8 @@
 	 terminate/3, 
 	 code_change/4]).
 
+-include("xylan_log.hrl").
+
 -define(SERVER, ?MODULE).
 
 -record(state, {}).
@@ -86,7 +88,7 @@ close(ConnectionHandler, ChannelId) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Pid]) ->
-    lager:debug("pid ~p", [Pid]),
+    ?debug("pid ~p", [Pid]),
     gen_fsm:send_event(self(), {manipulate, Pid}),
     {ok, run, #state{}}.
 
@@ -101,22 +103,22 @@ init([Pid]) ->
 %% @end
 %%--------------------------------------------------------------------
 run({manipulate, Pid} = _Event, State) ->
-    lager:debug("~p", [_Event]),
+    ?debug("~p", [_Event]),
     %% Ugly hack to make ssh_channel NOT terminate
     %% when receiving closed from user side.
     %% Will only work if ssh_channel state record is unchanged
-    lager:debug("old state: ~n~p", [sys:get_state(Pid)]),
+    ?debug("old state: ~n~p", [sys:get_state(Pid)]),
     %% state tuple from ssh_channel
     Self = self(),
     sys:replace_state(Pid, fun(SSHState) ->
 				   setelement(2, SSHState, Self)
 			   end),
-    lager:debug("new state: ~n~p", [sys:get_state(Pid)]),
+    ?debug("new state: ~n~p", [sys:get_state(Pid)]),
     Pid ! xylan_dummy_up,
     {next_state, run, State};
 
 run(_Event, State) ->
-    lager:debug("unknown event ~p", [_Event]),
+    ?debug("unknown event ~p", [_Event]),
     {next_state, run, State}.
 
 %%--------------------------------------------------------------------
@@ -130,7 +132,7 @@ run(_Event, State) ->
 %% @end
 %%--------------------------------------------------------------------
 run(_Event, _From, State) ->
-    lager:debug("unknown event ~p", [_Event]),
+    ?debug("unknown event ~p", [_Event]),
     {reply, ok, run, State}.
 
 
@@ -148,7 +150,7 @@ run(_Event, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_event(_Event, StateName, State) ->
-    lager:debug("unknown event ~p", [_Event]),
+    ?debug("unknown event ~p", [_Event]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -168,11 +170,11 @@ handle_event(_Event, StateName, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_sync_event({close, _ChannelId} = _Event, _, StateName, State) ->
-    lager:debug("unknown event ~p", [_Event]),
+    ?debug("unknown event ~p", [_Event]),
     {reply, ok, StateName, State};
 
 handle_sync_event(_Event, _From, StateName, State) ->
-    lager:debug("unknown event ~p", [_Event]),
+    ?debug("unknown event ~p", [_Event]),
     {reply, ok, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -189,7 +191,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info(_Info, StateName, State) ->
-    lager:debug("unknown info ~p", [_Info]),
+    ?debug("unknown info ~p", [_Info]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -204,7 +206,7 @@ handle_info(_Info, StateName, State) ->
 %% @end
 %%--------------------------------------------------------------------
 terminate(_Reason, _StateName, _State) ->
-    lager:debug("~p", [_Reason]),
+    ?debug("~p", [_Reason]),
     ok.
 
 %%--------------------------------------------------------------------

@@ -35,6 +35,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-include("xylan_log.hrl").
 -include("xylan_socket.hrl").
 
 -define(B_CONNECT_TMO, 30000).
@@ -106,9 +107,9 @@ init([Parent, SessionKey]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call(_Request, _From, State) ->
-    lager:warning("~s:handle_call: got ~p\n", [_Request]),
-    Reply = {error,einval},
-    {reply, Reply, State}.
+    ?warning("handle_call: got ~p\n", [_Request]),
+    {reply, {error,bad_call}, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -121,7 +122,7 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({set_a,Socket}, State) ->
-    lager:debug("set_a"),
+    ?debug("set_a"),
     {T,C,E} = xylan_socket:tags(Socket),
     xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}]),
     %% FIXME: try route match based only on socket info !
@@ -129,7 +130,7 @@ handle_cast({set_a,Socket}, State) ->
 			    a_closed = false,
 			    tag_a=T, tag_a_closed=C, tag_a_error=E}};
 handle_cast({set_b,Socket}, State) ->
-    lager:debug("set_b, send ~p",[State#state.initial]),
+    ?debug("set_b, send ~p",[State#state.initial]),
     {T,C,E} = xylan_socket:tags(Socket),
     xylan_socket:setopts(Socket, [{packet,0},{mode,binary},{active,once}] ++
 			     State#state.b_socket_options),
@@ -151,7 +152,7 @@ handle_cast({set_b,Socket}, State) ->
 			    tag_b=T, tag_b_closed=C, tag_b_error=E}};
 
 handle_cast({socket_options, ASockOpts, BSockOpts}, State) ->
-    lager:debug("a-options ~p\nb-options ~p", [ASockOpts, BSockOpts]),
+    ?debug("a-options ~p\nb-options ~p", [ASockOpts, BSockOpts]),
     if State#state.a_sock =/= undefined ->
 	    xylan_socket:setopts(State#state.a_sock, ASockOpts);
        true -> do_nothing
@@ -165,16 +166,16 @@ handle_cast({socket_options, ASockOpts, BSockOpts}, State) ->
 
 handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
     LOptions = [{mode,binary},{packet,0},{nodelay,true}] ++ LOpts,
-    lager:debug("connect: ~p:~w <-> ~p:~w",[LIP,LPort,RIP,RPort]),
+    ?debug("connect: ~p:~w <-> ~p:~w",[LIP,LPort,RIP,RPort]),
     case xylan_socket:connect(LIP,LPort,LOptions,3000) of
 	{ok,A} ->
-	    lager:debug("A is connected"),
-	    lager:debug("A peer: ~p", [element(2,xylan_socket:peername(A))]),
+	    ?debug("A is connected"),
+	    ?debug("A peer: ~p", [element(2,xylan_socket:peername(A))]),
 	    ROptions = [{mode,binary},{packet,4},{nodelay,true}] ++ ROpts,
 	    case xylan_socket:connect(RIP,RPort,ROptions,3000) of
 		{ok,B} ->
-		    lager:debug("B is connected"),
-		    lager:debug("socket options: A:~w <-> B:~w",
+		    ?debug("B is connected"),
+		    ?debug("socket options: A:~w <-> B:~w",
 				[LOptions, ROptions]),
 		    %% FIXME make better and signed!
 		    xylan_socket:send(B, State#state.session_key),
@@ -191,18 +192,18 @@ handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
 		    {noreply, State1};
 		_Error ->
 		    xylan_socket:close(A),
-		    lager:warning("unable to connect B side to ~p:~p error:~p", 
+		    ?warning("unable to connect B side to ~p:~p error:~p", 
 		     [RIP,RPort,_Error]),
 		    {stop, normal, State}
 	    end;
 	_Error ->
-	    lager:warning("unable to connect A side to ~p:~p error:~p",
+	    ?warning("unable to connect A side to ~p:~p error:~p",
 		     [LIP,LPort,_Error]),
 	    {stop, normal, State}
     end;
 
 handle_cast(_Msg, State) ->
-    lager:debug("unknown message ~p\n", [_Msg]),
+    ?debug("unknown message ~p\n", [_Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -220,12 +221,12 @@ handle_cast(_Msg, State) ->
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_a,
       Socket =:= (State#state.a_sock)#xylan_socket.socket ->
-    lager:debug("data from A ~p", [Data]),
+    ?debug("data from A ~p", [Data]),
     if State#state.b_sock =:= undefined -> %% before proxy is connected
 	    {ok,{LocalIP,LocalPort}} = xylan_socket:sockname(State#state.a_sock),
 	    {ok,{RemoteIP,RemotePort}} =
 		xylan_socket:peername(State#state.a_sock),
-	    lager:debug("A peer: ~p", [{RemoteIP,RemotePort}]),
+	    ?debug("A peer: ~p", [{RemoteIP,RemotePort}]),
 	    RouteInfo = [{dst_ip,inet:ntoa(LocalIP)},{dst_port,LocalPort},
 			 {src_ip,inet:ntoa(RemoteIP)},{src_port,RemotePort},
 			 {data,Data}],
@@ -242,21 +243,21 @@ handle_info({Tag,Socket,Data}, State) when
 handle_info({Tag,Socket,Data}, State) when 
       Tag =:= State#state.tag_b,
       Socket =:= (State#state.b_sock)#xylan_socket.socket ->
-    lager:debug("data from B ~p", [Data]),
-    lager:debug("B peer~p", [element(2,xylan_socket:peername(State#state.b_sock))]),
+    ?debug("data from B ~p", [Data]),
+    ?debug("B peer~p", [element(2,xylan_socket:peername(State#state.b_sock))]),
     xylan_socket:send(State#state.a_sock, Data),
     xylan_socket:setopts(State#state.b_sock, [{active,once}]),
-    lager:debug("data from B sent", []),
+    ?debug("data from B sent", []),
     {noreply, State};
 
 %% closed A side (user)
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_a_closed,
       Socket =:= (State#state.a_sock)#xylan_socket.socket ->
-    lager:debug("got A closed", []),
+    ?debug("got A closed", []),
     if State#state.b_closed;
        State#state.b_sock =:= undefined ->
-	    lager:debug("both closed", []),
+	    ?debug("both closed", []),
 	    %% xylan_socket:close(State#state.user)
 	    {stop, normal, State};
        true ->
@@ -268,10 +269,10 @@ handle_info({Tag,Socket}, State) when
 handle_info({Tag,Socket}, State) when
       Tag =:= State#state.tag_b_closed,
       Socket =:= (State#state.b_sock)#xylan_socket.socket ->
-    lager:debug("got B closed", []),
+    ?debug("got B closed", []),
     if State#state.a_closed;
        State#state.a_sock =:= undefined ->
-	    lager:debug("both closed", []),
+	    ?debug("both closed", []),
 	    %% xylan_socket:close(State#state.b_sock)
 	    {stop, normal, State};
        true ->
@@ -283,10 +284,10 @@ handle_info({Tag,Socket}, State) when
 handle_info({timeout,Btimer,b_timer}, State) when 
       State#state.b_timer =:= Btimer,
       State#state.b_sock =:= undefined ->
-    lager:warning("B side never connected timeout:~p", [?B_CONNECT_TMO]),
+    ?warning("B side never connected timeout:~p", [?B_CONNECT_TMO]),
     {stop, normal, State};
 handle_info(_Info, State) ->
-    lager:warning("handle_info: got ~p\n", [_Info]),
+    ?warning("handle_info: got ~p\n", [_Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -301,14 +302,14 @@ handle_info(_Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
-    lager:debug("~p", [_Reason]),
+    ?debug("~p", [_Reason]),
     if State#state.a_sock =/= undefined ->
-	    lager:debug("terminate close A side (user)"),
+	    ?debug("terminate close A side (user)"),
 	    xylan_socket:close(State#state.a_sock);
        true -> ok
     end,
     if State#state.b_sock =/= undefined ->
-	    lager:debug("close B side (proxy)"),
+	    ?debug("close B side (proxy)"),
 	    xylan_socket:close(State#state.b_sock);
        true -> ok
     end.
