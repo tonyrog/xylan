@@ -379,7 +379,11 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    ?error("listen socket not found"),
 		    {noreply, State};
 		{value,{UserSock,Ref},UserSocks} ->
+		    ?debug("accept1: ref=~w, status=~w\n",
+			   [Ref, socket_status(UserSock)]),
 		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
+		    ?debug("accept2: ref'=~w, status=~w\n",
+			   [Ref1, socket_status(UserSock)]),
 		    UsersSocks1 = [{UserSock,Ref1}|UserSocks],
 		    SessionKey = crypto:strong_rand_bytes(16),
 		    case xylan_socket:async_socket(UserSock,Socket) of
@@ -557,6 +561,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+socket_status(XSocket) ->
+    if is_port(XSocket#xylan_socket.socket) ->
+	    case prim_inet:getstatus(XSocket#xylan_socket.socket) of
+		{ok,Status} -> io_lib:format("~p", [Status]);
+		_ -> " "
+	    end;
+       true ->
+	    "???"
+    end.
+
 
 validate_clients(Clients, UserPorts) ->
     [validate_client(C,UserPorts) || C <- Clients].
