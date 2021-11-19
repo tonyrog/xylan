@@ -379,21 +379,25 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 		    ?error("listen socket not found"),
 		    {noreply, State};
 		{value,{UserSock,Ref},UserSocks} ->
-		    ?debug("accept1: ref=~w, status=~w\n",
+		    ?debug("accept1: ref=~w, status=~s\n",
 			   [Ref, socket_status(UserSock)]),
 		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
-		    ?debug("accept2: ref'=~w, status=~w\n",
+		    ?debug("accept2: ref'=~w, status=~s\n",
 			   [Ref1, socket_status(UserSock)]),
 		    UsersSocks1 = [{UserSock,Ref1}|UserSocks],
 		    SessionKey = crypto:strong_rand_bytes(16),
 		    case xylan_socket:async_socket(UserSock,Socket) of
 			{ok, XSocket} ->
+			    ?debug("accept3: status=~s\n",
+				   [socket_status(UserSock)]),
 			    case xylan_proxy:start(SessionKey) of
 				{ok, Pid} ->
 				    Mon = erlang:monitor(process, Pid),
 				    xylan_socket:controlling_process(XSocket, Pid),
 				    gen_server:cast(Pid, {set_a,XSocket}),
 				    Ls = [{Pid,Mon,SessionKey}|State#state.proxy_list],
+				    ?debug("accept4: status=~s\n",
+					   [socket_status(UserSock)]),
 				    {noreply, State#state { proxy_list = Ls,
 							    user_socks=UsersSocks1}};
 				_Error ->
