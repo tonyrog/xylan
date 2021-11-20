@@ -61,6 +61,7 @@
 
 -type interface() :: atom() | string().
 -type timer() :: reference().
+-type socket_ref() :: integer().
 
 -type user_port() :: 
 	inet:port_number() |
@@ -69,8 +70,7 @@
 	{atom(),inet:ip_address(), inet:port_number()} |
 	{atom(),interface(), inet:port_number()}.
 
--type user_ports() :: 
-	user_port() | [user_port()].
+-type user_ports() :: user_port() | [user_port()].
 
 -type regexp() :: iodata().
 
@@ -101,11 +101,11 @@
 	  %% fixme: may need to be able to have multiple control sockets
 	  cntl_sock :: xylan_socket(),  %% control chan listen socket
 	  cntl_port :: integer(),
-	  cntl_ref  :: term(), %% async accept reference
+	  cntl_ref  :: socket_ref(), %% async accept reference
 	  data_sock :: xylan_socket(),  %% data chan listen socket
 	  data_port :: integer(),
-	  data_ref  :: term(), %% async accept reference
-	  user_socks :: [{xylan_socket(), term()}], %% listen sockets
+	  data_ref  :: socket_ref(), %% async accept reference
+	  user_socks :: [{xylan_socket(),socket_ref()}], %% listen sockets
 	  user_ports :: user_ports(),
 	  clients = []  :: [#client{}],
 	  auth_list = [] :: [{xylan_socket(),timer()}], %% client sesion
@@ -253,7 +253,7 @@ open_user_port(Port,IP) when is_integer(Port) ->
 					   {packet,0}]) of
 	{ok,Socket} ->
 	    {ok,Ref} = xylan_socket:async_accept(Socket),
-	    [{Socket,Ref}];
+	    [{Ref,Socket}];
 	Error ->
 	    ?warning("Error listen to port ~w:~p ~p",[Port,IP,Error]),
 	    []
@@ -374,30 +374,22 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	    end;
 	true ->
 	    ?debug("(user connect) ~p", [_Msg]),
-	    case lists:keytake(Ref, 2, State#state.user_socks) of
+	    case take_socket_ref(Listen, Ref, State#state.user_socks) of
 		false ->
 		    ?error("listen socket not found"),
 		    {noreply, State};
-		{value,{UserSock,Ref},UserSocks} ->
-		    ?debug("accept1: ref=~w, status=~s\n",
-			   [Ref, socket_status(UserSock)]),
+		{value,UserSock,UserSocks} ->
 		    {ok,Ref1} = xylan_socket:async_accept(UserSock),
-		    ?debug("accept2: ref'=~w, status=~s\n",
-			   [Ref1, socket_status(UserSock)]),
-		    UsersSocks1 = [{UserSock,Ref1}|UserSocks],
+		    UsersSocks1 = [{Ref1,UserSock}|UserSocks],
 		    SessionKey = crypto:strong_rand_bytes(16),
 		    case xylan_socket:async_socket(UserSock,Socket) of
 			{ok, XSocket} ->
-			    ?debug("accept3: status=~s\n",
-				   [socket_status(UserSock)]),
 			    case xylan_proxy:start(SessionKey) of
 				{ok, Pid} ->
 				    Mon = erlang:monitor(process, Pid),
 				    xylan_socket:controlling_process(XSocket, Pid),
 				    gen_server:cast(Pid, {set_a,XSocket}),
 				    Ls = [{Pid,Mon,SessionKey}|State#state.proxy_list],
-				    ?debug("accept4: status=~s\n",
-					   [socket_status(UserSock)]),
 				    {noreply, State#state { proxy_list = Ls,
 							    user_socks=UsersSocks1}};
 				_Error ->
@@ -565,6 +557,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+take_socket_ref(Sock, Ref, SocketList) ->
+    take_socket_ref_(Sock, Ref, SocketList, []).
+
+take_socket_ref_(Sock, Ref, [A={Ref,XSock}|SocketList], Acc) ->
+    if XSock#xylan_socket.socket =:= Sock ->
+	    {value,XSock,lists:revrerse(Acc, SocketList)};
+       true ->
+	    take_socket_ref_(Sock, Ref, SocketList, [A|Acc])
+    end;
+take_socket_ref_(Sock, Ref, [A|SocketList], Acc) ->
+    take_socket_ref_(Sock, Ref, SocketList, [A|Acc]);    
+take_socket_ref_(_Sock, _Ref, [], _) ->
+    false.
+
 
 socket_status(XSocket) ->
     if is_port(XSocket#xylan_socket.socket) ->
@@ -746,7 +753,7 @@ take_(Fun, Pos, [H|T], Acc) ->
     Elem = if Pos =:= 0 -> H; true -> element(Pos,H) end,
     case Fun(Elem) of
 	true ->
-	    {value,H,lists:reverse(Acc)++T};
+	    {value,H,lists:reverse(Acc, T)};
 	false ->
 	    take_(Fun,Pos,T,[H|Acc])
     end;
