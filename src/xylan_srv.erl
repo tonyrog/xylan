@@ -563,7 +563,7 @@ take_socket_ref(Sock, Ref, SocketList) ->
 
 take_socket_ref_(Sock, Ref, [A={Ref,XSock}|SocketList], Acc) ->
     if XSock#xylan_socket.socket =:= Sock ->
-	    {value,XSock,lists:revrerse(Acc, SocketList)};
+	    {value,XSock,lists:reverse(Acc, SocketList)};
        true ->
 	    take_socket_ref_(Sock, Ref, SocketList, [A|Acc])
     end;
