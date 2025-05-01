@@ -26,17 +26,20 @@
 %%%-------------------------------------------------------------------
 -module(xylan_menu).
 
--export([spec/0, example/0, menu/0]).
+-export([spec/0, example/0]).
+-export([start/0]).
 
+-define(DEBUG, true).
 -include("xylan_log.hrl").
 
-menu() ->
+
+start() ->
     Spec = spec(),
     Config = example(),
     %% Validate start spec
-    hex:validate_flags(Config, Spec),
+    xylan_yang:validate_flags(Config, Spec),
     Db = load(Config, []),
-    ?debug("menu: db ~p", Db),
+    ?debug("menu: db ~p", [Db]),
     Output = fun(Key) ->
 		     io:format("~p~n",[Key])
 	     end,
@@ -44,10 +47,11 @@ menu() ->
 		    io:get_line(">")
 	    end,
 
-    menu_loop(Spec, Db, Output, Input).
+    menu_loop([Spec], Db, Output, Input).
 
 menu_loop(Spec, Db, Output, Input) ->
-    case menu(Spec, Spec, Db, Output, Input) of
+    Top = top(Spec),
+    case menu(Top, Top, Db, Output, Input) of
 	repeat -> 
 	    menu_loop(Spec, Db, Output, Input);
 	{continue, NewSpec} -> 
@@ -60,11 +64,12 @@ menu_loop(Spec, Db, Output, Input) ->
 	    ok
     end.
 
-push(New, Old) ->
-    [New, Old].
+top([Top|_]) -> Top.
 
-pop([_Last | Prev]) ->
-    Prev.
+push(New, Old) -> [New | Old].
+
+pop([Top]) -> [Top];
+pop([_Last | Prev]) -> Prev.
 
 
 menu([], Spec, Db, _Output, Input) ->
@@ -74,7 +79,8 @@ menu([], Spec, Db, _Output, Input) ->
 	".\n" -> repeat;
 	"?\n" -> repeat;
 	"exit\n" -> exit;
-	_ -> scan_input(Choice, Spec, Db)
+	_ ->
+	    scan_input(Choice, Spec, Db)
     end;
 menu([{key, Key, _TS} | List], Spec, Db, Output, Input) ->
     ?debug("menu: key ~p ignored.",[Key]),
@@ -83,20 +89,25 @@ menu([{_Type, Key, _TS} | List], Spec, Db, Output, Input) ->
     Output(Key),
     menu(List, Spec, Db, Output, Input).
 
-
 scan_input(Choice, Spec, Db) ->
-    case string:tokens(Choice, [$ , $\n]) of
-	[Key, Value] -> search_spec(list_to_atom(Key), Value, Spec, Db);
-	[Key] -> search_spec(list_to_atom(Key), "", Spec, Db);
-	_ -> repeat
+    case string:tokens(Choice, "\s\n") of
+	[Key, Value] -> 
+	    search_spec(list_to_atom(Key), Value, Spec, Db);
+	[Key] ->
+	    search_spec(list_to_atom(Key), "", Spec, Db);
+	_ ->
+	    repeat
     end.
 
 search_spec(Key, Value, Spec, Db) ->
     ?debug("search_spec: ~p = ~p, ~p, ~p", [Key, Value, Spec, Db]),
     case lists:keyfind(Key, 2, Spec) of
-	{leaf, Key, TS} -> verify_ts(Key, Value, TS, Spec, Db);
-	{key, Key, []} = KeyPost -> search_spec(Key, Value, lists:delete(KeyPost, Spec), Db);
-	{_, Key, NewSpec} -> {continue, NewSpec} %% Pushed on old spec ??
+	{leaf, Key, TS} ->
+	    verify_ts(Key, Value, TS, Spec, Db);
+	{key, Key, []} = KeyPost ->
+	    search_spec(Key, Value, lists:delete(KeyPost, Spec), Db);
+	{_, Key, NewSpec} ->
+	    {continue, NewSpec} %% Pushed on old spec ??
     end.
 
 verify_ts(Key, Value, [{type, enumeration, Enums}], Spec, Db) ->
@@ -123,11 +134,14 @@ change_config(Key, Value, Spec, Db) ->
 	    
 load([], Db) ->
     Db;
-load([{Key, [Value]} | Rest], Db) when is_tuple(Value) -> 
-    load(Rest, load_list(Key, 1, Value, []) ++ Db);
+load([{_Key, Value=[{Item,_List}]} | Rest], Db) -> 
+    io:format("Load ~p = ~p\n", [Item, Value]),
+    load(Rest, load_list(Item, 1, Value, []) ++ Db);
 load([{_Key, Value} | Rest], Db) when is_tuple(Value) ->	    
+    io:format("Load ~p = ~p\n", [_Key, Value]),
     load(Rest, Db);
 load([{Key, Value} | Rest], Db) ->
+    io:format("Load ~p = ~p\n", [Key, Value]),
     load(Rest, [{Key, Value} |Db]).
 
 load_list(_Key, _N, [], Acc) ->
@@ -147,10 +161,18 @@ spec() ->
 	[
 	 {'case', number,
 	  [{leaf, number, [{type, uint32, []}]}]},
+
 	 {'case', 'interface-and-number',
 	  [{container, 'interface-and-number', 
 	    [{leaf, interface, [{type, string, []}]},
-	     {leaf, number, [{type, uint32, []}]}]}]}]}]},
+	     {leaf, number, [{type, uint32, []}]}]}]},
+
+	 {'case', 'ip-and-number',
+	  [{container, 'ip-and-number', 
+	    [{leaf, ip, [{type, 'yang:ip-address', []}]},
+	     {leaf, number, [{type, uint32, []}]}]}]}
+	]}
+      ]},
      {leaf, client_port, [{type, uint32, []}]},
      {leaf, data_port, [{type, uint32, []}]},
      {leaf, auth_timeout, [{type, uint32, []}]},
@@ -182,26 +204,25 @@ spec() ->
 	   
 		      
 example() ->
-[{mode, server},
- {id, "server"},   %% id of server (may be used when server is also client?)
- {ports, 
-  [{number, 46122},
-   {'interface-and-number',[{interface, "en1"},{number, 2222}]},
-   {'ip-and-number',[{ip, {127,0,0,1}}, {number, 2222}]}]},
- {client_port, 29390},  %% port where client connects
- {data_port,   29391},  %% client callback proxy port
- {auth_timeout, 5000},  %% client session auth timeout
- {data_timeout, 5000},  %% user initial data timeout
- {clients,  %% configure known clients
-  [{client,
-    [{name, "local"},
-     {server_key, {uintkey, 3177648541185394227}},   %% server is signing using this key
-     {client_key, {uintkey, 12187761947737533676}},  %% client is signing using this key
-     {matches,
-      [{match, [{data, "SSH-2.0.*"}]},   %% match port and initial
-       {match, [{data, "GET .*"}]}]       %% match a specific url
-     }
-    ]}
-]} 
-
-  ].
+    [{mode, server},
+     {id, "server"},   %% id of server (may be used when server is also client?)
+     {ports, 
+      [{number, 46122},
+       {'interface-and-number',[{interface, "en1"},{number, 2222}]},
+       {'ip-and-number',[{ip, {127,0,0,1}}, {number, 2222}]}]},
+     {client_port, 29390},  %% port where client connects
+     {data_port,   29391},  %% client callback proxy port
+     {auth_timeout, 5000},  %% client session auth timeout
+     {data_timeout, 5000},  %% user initial data timeout
+     {clients,  %% configure known clients
+      [{client,
+	[{name, "local"},
+	 {server_key, {uintkey, 3177648541185394227}},   %% server is signing using this key
+	 {client_key, {uintkey, 12187761947737533676}},  %% client is signing using this key
+	 {matches,
+	  [{match, [{data, "SSH-2.0.*"}]},   %% match port and initial
+	   {match, [{data, "GET .*"}]}]       %% match a specific url
+	 }
+	]}
+      ]} 
+    ].
