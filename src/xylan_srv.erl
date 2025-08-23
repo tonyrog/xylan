@@ -730,16 +730,16 @@ close_socket(Socket, State) ->
 	    case take_socket(Socket,1,State#state.auth_list) of
 		false ->
 		    State;
-		{value,{Socket,TRef},Ls} ->
+		{value,{XSocket,TRef},Ls} ->
 		    ?debug("close client socket"),
 		    cancel_timer(TRef),
-		    xylan_socket:close(Socket),
+		    xylan_socket:close(XSocket),
 		    State#state { auth_list = Ls }
 	    end;
-	{value,{Socket,TRef},Ls} ->
+	{value,{XSocket,TRef},Ls} ->
 	    ?debug("close data socket"),
 	    cancel_timer(TRef),
-	    xylan_socket:close(Socket),
+	    xylan_socket:close(XSocket),
 	    State#state { data_list = Ls }
     end.
 

@@ -28,12 +28,24 @@
 
 -export([start/0]).
 -export([status/0]).
+-export([set_debug/1]).
+-export([set_module_debug/2]).
 -export([generate_key/0]).
 
 start() ->
     ssl:start(),
     application:start(afunix),
     application:start(xylan).
+
+set_debug(true) ->
+    logger:set_primary_config(level, debug);
+set_debug(false) ->
+    logger:set_primary_config(level, info).
+
+set_module_debug(Module, true) ->
+    logger:set_module_level(Module, debug);
+set_module_debug(Module, false) ->
+    logger:set_module_level(Module, info).
 
 status() ->
     Env = application:get_all_env(xylan),
