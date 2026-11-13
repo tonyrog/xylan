@@ -49,7 +49,8 @@ all() ->
      {group, client_cert},
      {group, handshake_limits},
      {group, rotation},
-     {group, gateway}].
+     {group, gateway},
+     {group, ssh_jump}].
 
 groups() ->
     [{apikey, [sequence],
@@ -78,6 +79,13 @@ groups() ->
      {handshake_limits, [sequence],
       [handshake_limit_per_ip,
        handshake_timeout]},
+     {ssh_jump, [sequence],
+      [jump_direct,
+       jump_chain,
+       jump_user_acl,
+       jump_unknown_key,
+       jump_names_only,
+       jump_no_shell]},
      {gateway, [sequence],
       [gw_missing_key,
        gw_bad_key,
@@ -221,6 +229,15 @@ init_per_group(handshake_limits, Config) ->
 		     {clients, []}]),
     [{ports, P}, {procs, [Srv]} | Config];
 
+init_per_group(ssh_jump, Config) ->
+    case {os:find_executable("ssh"),
+	  gen_tcp:listen(0, [{ip, {127,0,1,1}}])} of
+	{false, _} -> {skip, "no ssh client"};
+	{_, {error, _}} -> {skip, "can not bind 127.0.1.1"};
+	{_, {ok, L}} ->
+	    gen_tcp:close(L),
+	    init_ssh_jump(Config)
+    end;
 init_per_group(gateway, Config) ->
     P = ports([gw, backend, user, cntl_tls, data_tls]),
     {GC, GK, _} = cert(gw, Config),
@@ -255,6 +272,50 @@ end_per_group(gateway, Config) ->
     stop_procs(Config);
 end_per_group(_Group, Config) ->
     stop_procs(Config).
+
+init_ssh_jump(Config) ->
+    {ok, _} = application:ensure_all_started(ssh),
+    Priv = ?config(priv_dir, Config),
+    Dir = filename:join(Priv, "jump"),
+    P = ports([vport, j1, j2, home_sshd, nas_sshd, cntl, data]),
+    %% user keys (OpenSSH reads PEM private keys)
+    {TonyCfg, TonyPub} = ssh_user(Dir, "tony"),
+    {GuestCfg, GuestPub} = ssh_user(Dir, "guest"),
+    {OtherCfg, _} = ssh_user(Dir, "other"),
+    %% the final machines: plain ssh daemons with exec
+    Home = start_sshd(filename:join(Dir, "home"), port(home_sshd, P),
+		      "home", [TonyPub, GuestPub]),
+    Nas = start_sshd(filename:join(Dir, "nas"), port(nas_sshd, P),
+		     "nas", [TonyPub, GuestPub]),
+    %% xylan: two loopback user ports routed on dst_ip to client "home",
+    %% a non matching ip tuple route is tried first
+    VP = port(vport, P),
+    Srv = start_srv([{port, [{jh, "127.0.1.1", VP}, {jn, "127.0.1.2", VP}]},
+		     {client_port, port(cntl, P)}, {data_port, port(data, P)},
+		     {clients,
+		      [{"other", [{server_key, ?OLD_SKEY}, {client_key, ?OLD_CKEY},
+				  {route, [[{dst_ip, {127,0,1,9}}]]}]},
+		       {"home", [{server_key, ?SKEY}, {client_key, ?CKEY},
+				 {route, [[{dst_ip, {127,0,1,1}}],
+					  [{dst_ip, {127,0,1,2}}]]}]}]}]),
+    Clt = start_clt([{id, "home"}, {server_port, port(cntl, P)},
+		     {server_key, ?SKEY}, {client_key, ?CKEY},
+		     {route, [{[{dst_ip, {127,0,1,1}}], [{port, port(home_sshd, P)}]},
+			      {[{dst_ip, {127,0,1,2}}], [{port, port(nas_sshd, P)}]}]}]),
+    J2Dir = filename:join(Dir, "j2"),
+    J1Dir = filename:join(Dir, "j1"),
+    _ = xylan_jump:generate_host_key(J2Dir),
+    _ = xylan_jump:generate_host_key(J1Dir),
+    J2 = start_jump([{port, port(j2, P)}, {system_dir, J2Dir}, {virtual_port, VP},
+		     {targets, [{"home", {127,0,1,1}}, {"nas.home", {127,0,1,2}}]},
+		     {users, [{"tony", [{keys, [TonyPub]}, {allow, all}]},
+			      {"guest", [{keys, [GuestPub]}, {allow, ["home"]}]}]}]),
+    J1 = start_jump([{port, port(j1, P)}, {system_dir, J1Dir},
+		     {targets, [{"xylan2", {"127.0.0.1", port(j2, P)}}]},
+		     {users, [{"tony", [{keys, [TonyPub]}, {allow, all}]}]}]),
+    timer:sleep(500),
+    [{ports, P}, {ssh_cfg, #{ tony => TonyCfg, guest => GuestCfg, other => OtherCfg }},
+     {procs, [J1, J2, Clt, Srv, Home, Nas]} | Config].
 
 %%--------------------------------------------------------------------
 %% apikey
@@ -498,6 +559,55 @@ handshake_timeout(Config) ->
     ok.
 
 %%--------------------------------------------------------------------
+%% ssh jump
+%%--------------------------------------------------------------------
+
+jump_direct(Config) ->
+    Out = ssh_run(Config, tony, ["-J tony@127.0.0.1:", j(j2, Config),
+				 " -p ", j(vport, Config), " home echo hi"]),
+    true = string:find(Out, "home:echo hi") =/= nomatch,
+    ok.
+
+jump_chain(Config) ->
+    %% laptop -> jump1 -> xylan2 (jump2) -> xylan tunnel -> nas
+    Out = ssh_run(Config, tony, ["-J tony@127.0.0.1:", j(j1, Config),
+				 ",tony@xylan2:", j(j2, Config),
+				 " -p ", j(vport, Config), " nas.home uname"]),
+    true = string:find(Out, "nas:uname") =/= nomatch,
+    ok.
+
+jump_user_acl(Config) ->
+    Ok = ssh_run(Config, guest, ["-J guest@127.0.0.1:", j(j2, Config),
+				 " -p ", j(vport, Config), " home id"]),
+    true = string:find(Ok, "home:id") =/= nomatch,
+    Denied = ssh_run(Config, guest, ["-J guest@127.0.0.1:", j(j2, Config),
+				     " -p ", j(vport, Config), " nas.home id"]),
+    nomatch = string:find(Denied, "nas:id"),
+    ok.
+
+jump_unknown_key(Config) ->
+    Out = ssh_run(Config, other, ["-J tony@127.0.0.1:", j(j2, Config),
+				  " -p ", j(vport, Config), " home id"]),
+    nomatch = string:find(Out, "home:id"),
+    ok.
+
+jump_names_only(Config) ->
+    %% raw address and wrong port are refused
+    Ip = ssh_run(Config, tony, ["-J tony@127.0.0.1:", j(j2, Config),
+				" -p ", j(vport, Config), " 127.0.1.1 id"]),
+    nomatch = string:find(Ip, "home:id"),
+    Port = ssh_run(Config, tony, ["-J tony@127.0.0.1:", j(j2, Config),
+				  " -p 22 home id"]),
+    nomatch = string:find(Port, "home:id"),
+    ok.
+
+jump_no_shell(Config) ->
+    Out = ssh_run(Config, tony, ["-p ", j(j2, Config), " tony@127.0.0.1 echo hi"]),
+    nomatch = string:find(Out, "echo hi"),
+    nomatch = string:find(Out, "hi\n"),
+    ok.
+
+%%--------------------------------------------------------------------
 %% api gateway
 %%--------------------------------------------------------------------
 
@@ -592,6 +702,64 @@ start_clt(Args) ->
 				      {auth_timeout, 3000} | Args]),
     unlink(Pid),
     Pid.
+
+start_jump(Opts) ->
+    {ok, Pid} = xylan_jump:start_link(Opts),
+    unlink(Pid),
+    Pid.
+
+%% ssh user key (PEM) + ssh client config, returns {ConfigFile, PubLine}
+ssh_user(Dir, Name) ->
+    KeyFile = filename:join(Dir, Name ++ "_key"),
+    ok = filelib:ensure_dir(KeyFile),
+    Key = public_key:generate_key({namedCurve, secp256r1}),
+    ok = file:write_file(KeyFile, public_key:pem_encode(
+				    [public_key:pem_entry_encode('ECPrivateKey', Key)])),
+    ok = file:change_mode(KeyFile, 8#600),
+    Pub = binary_to_list(
+	    string:trim(ssh_file:encode([{ssh_file:extract_public_key(Key),
+					  [{comment, Name}]}], openssh_key))),
+    Cfg = filename:join(Dir, Name ++ ".ssh_config"),
+    ok = file:write_file(Cfg, ["Host *\n",
+			       "  IdentityFile ", KeyFile, "\n",
+			       "  IdentitiesOnly yes\n",
+			       "  StrictHostKeyChecking no\n",
+			       "  UserKnownHostsFile /dev/null\n",
+			       "  BatchMode yes\n",
+			       "  LogLevel ERROR\n"]),
+    {Cfg, Pub}.
+
+%% a plain ssh daemon answering exec with "<Name>:<Command>"
+start_sshd(Dir, Port, Name, Pubs) ->
+    _ = xylan_jump:generate_host_key(Dir),
+    UserDir = filename:join(Dir, "user"),
+    ok = filelib:ensure_dir(filename:join(UserDir, "x")),
+    ok = file:write_file(filename:join(UserDir, "authorized_keys"),
+			 [[P, "\n"] || P <- Pubs]),
+    Parent = self(),
+    Pid = spawn(fun() ->
+			{ok, D} = ssh:daemon(Port, [{system_dir, Dir}, {user_dir, UserDir},
+						    {auth_methods, "publickey"},
+						    {exec, {direct, fun(Cmd) ->
+								     {ok, Name ++ ":" ++ Cmd}
+							     end}}]),
+			link(D),
+			Parent ! {self(), ready},
+			receive stop -> ok end
+		end),
+    receive {Pid, ready} -> Pid
+    after 5000 -> ct:fail({sshd_not_started, Name})
+    end.
+
+ssh_run(Config, User, Args) ->
+    Cfg = maps:get(User, ?config(ssh_cfg, Config)),
+    Cmd = lists:flatten(["timeout 15 ssh -F ", Cfg, " ", Args, " 2>&1"]),
+    Out = os:cmd(Cmd),
+    ct:log("~s~n~s", [Cmd, Out]),
+    Out.
+
+j(Name, Config) ->
+    integer_to_list(port(Name, Config)).
 
 start_gw(Name, Opts) ->
     {ok, Pid} = xylan_gw:start_link(Name, Opts),

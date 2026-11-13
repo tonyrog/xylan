@@ -49,5 +49,11 @@ init([]) ->
     Gateways = [{{xylan_gw,Name}, {xylan_gw, start_link, [Name, Opts]},
 		 permanent, 5000, worker, [xylan_gw]} ||
 		   {Name, Opts} <- application:get_env(xylan, api_gateways, [])],
-    {ok, { {one_for_one, 5, 10}, [Child | Gateways]} }.
+    Jump = case application:get_env(xylan, ssh_jump) of
+	       {ok, JumpOpts} ->
+		   [{xylan_jump, {xylan_jump, start_link, [JumpOpts]},
+		     permanent, 5000, worker, [xylan_jump]}];
+	       undefined -> []
+	   end,
+    {ok, { {one_for_one, 5, 10}, [Child | Gateways ++ Jump]} }.
 

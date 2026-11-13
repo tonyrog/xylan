@@ -1085,6 +1085,7 @@ match([{data,RE}|R], RouteInfo) ->
 match([{dst_ip,RE}|R], RouteInfo) ->
     case proplists:get_value(dst_ip, RouteInfo) of
 	undefined -> false;
+	RE -> match(R, RouteInfo);  %% exact ip tuple
 	IP when is_tuple(IP) -> match_data(inet:ntoa(IP), RE, R, RouteInfo);
 	IP when is_list(IP) ->  match_data(IP, RE, R, RouteInfo);
 	_ -> false
@@ -1101,6 +1102,7 @@ match([{dst_port,RE}|R], RouteInfo) ->
 match([{src_ip,RE}|R], RouteInfo) ->
     case proplists:get_value(src_ip, RouteInfo) of
 	undefined -> false;
+	RE -> match(R, RouteInfo);  %% exact ip tuple
 	IP when is_tuple(IP) -> match_data(inet:ntoa(IP), RE, R, RouteInfo);
 	IP when is_list(IP) ->  match_data(IP, RE, R, RouteInfo);
 	_ -> false
@@ -1124,6 +1126,12 @@ match_data(String, ssl, R, RouteInfo) ->
     case xylan_socket:request_type(String) of
 	ssl -> match(R, RouteInfo);
 	_ -> false
+    end;
+match_data(String, RE, R, RouteInfo) when is_tuple(RE) ->
+    %% ip tuple in the route, RouteInfo has the address as a string
+    case inet:ntoa(RE) =:= String of
+	true -> match(R, RouteInfo);
+	false -> false
     end;
 match_data(String, RE, R, RouteInfo) when is_integer(RE) -> 
     match_data(String, integer_to_list(RE), R, RouteInfo);

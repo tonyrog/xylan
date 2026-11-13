@@ -673,6 +673,12 @@ match_data(String, ssl, R, RouteInfo) ->
 	ssl -> match(R, RouteInfo);
 	_ -> false
     end;
+match_data(String, RE, R, RouteInfo) when is_tuple(RE) ->
+    %% ip tuple in the route, RouteInfo has the address as a string
+    case inet:ntoa(RE) =:= String of
+	true -> match(R, RouteInfo);
+	false -> false
+    end;
 match_data(String, RE, R, RouteInfo) when is_integer(RE) -> 
     match_data(String, integer_to_list(RE), R, RouteInfo);
 match_data(String, RE, R, RouteInfo) ->	

@@ -33,6 +33,7 @@
 -export([generate_key/0, generate_key/1]).
 -export([cert_fingerprint/1]).
 -export([generate_cert/1, generate_cert/2]).
+-export([generate_ssh_host_key/1]).
 -export([generate_api_key/1, generate_api_key/2]).
 -export([revoke_api_key/1, list_api_keys/0]).
 
@@ -138,6 +139,14 @@ generate_cert(Name, Options) ->
 	Error ->
 	    Error
     end.
+
+%% Create an ssh host key for the ssh jump server (ssh_jump system_dir)
+%% unless one exists, prints the host key fingerprint(s) users see on
+%% first connect.
+generate_ssh_host_key(Dir) ->
+    [io:format("~s ~s\n", [File, FP]) ||
+	{File, FP} <- xylan_jump:generate_host_key(Dir)],
+    ok.
 
 %% sha256 fingerprint of server certificate, for client pinning
 cert_fingerprint(CertFile) ->
