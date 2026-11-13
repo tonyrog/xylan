@@ -99,7 +99,7 @@
 	  a_socket_options :: list(),  %%
 	  b_socket_options :: list(),  %%
 	  require_tls = false :: boolean(), %% only tls+hmac_sha256 accepted
-	  client_cert :: undefined | string(), %% pinned client cert fingerprint
+	  client_cert :: undefined | [string()], %% pinned client cert fingerprints
 	  pid :: pid(),              %% client process
 	  mon :: reference(),        %% monitor of above
 	  route :: [[route_config()]]  %% config
@@ -542,7 +542,7 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 		      CC =:= undefined; Tls =:= true ->
 		    %% session is routed and data channel type match
 		    case CC =:= undefined orelse
-			xylan_lib:peer_fingerprint(XSocket) =:= CC of
+			lists:member(xylan_lib:peer_fingerprint(XSocket), CC) of
 			true ->
 			    ProxyList = lists:keydelete(Data,3,State#state.proxy_list),
 		    erlang:demonitor(Mon, [flush]),
@@ -772,14 +772,15 @@ auth_client(ID, Tls, XSocket, Message, State) ->
 	    {noreply, State};
 	Client when Client#client.client_cert =/= undefined,
 		    is_pid(Client#client.pid) ->
-	    case xylan_lib:peer_fingerprint(XSocket) of
-		FP when FP =:= Client#client.client_cert ->
+	    FP = xylan_lib:peer_fingerprint(XSocket),
+	    case lists:member(FP, Client#client.client_cert) of
+		true ->
 		    ?info("client ~p connected (client cert ok)\n", [ID]),
 		    xylan_socket:controlling_process(XSocket, Client#client.pid),
 		    gen_server:cast(Client#client.pid,
 				    {auth_socket, XSocket, Tls, Message}),
 		    {noreply, State};
-		FP ->
+		false ->
 		    ?warning("client ~p bad client certificate ~s, rejected",
 			     [ID, if FP =:= undefined -> "(none)";
 				     true -> FP end]),
@@ -808,7 +809,8 @@ validate_port_or_none(Name, Port) ->
 validate_tls_options(none, none, Opts, _AnyClientCert) ->
     Opts;
 validate_tls_options(_, _, Opts0, AnyClientCert) ->
-    Opts = xylan_lib:tls_server_options(Opts0, AnyClientCert),
+    Opts = xylan_lib:tls_server_options(xylan_lib:tls_password(Opts0),
+					AnyClientCert),
     HasCert = lists:any(fun(K) -> proplists:is_defined(K, Opts) end,
 			[certfile, cert, certs_keys]),
     if not HasCert ->
@@ -859,7 +861,8 @@ validate_clients(Clients, UserPorts) ->
 validate_client({Name,C}, UserPorts) ->
     ClientCert = case proplists:get_value(client_cert, C) of
 		     undefined -> undefined;
-		     FP when is_list(FP) -> xylan_lib:normalize_fingerprint(FP);
+		     FP when is_list(FP), FP =/= [] ->
+			 xylan_lib:normalize_fingerprints(FP);
 		     _ -> ?error("client ~s bad client_cert value", [Name]),
 			  erlang:error(bad_client_cert)
 		 end,

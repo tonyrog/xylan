@@ -89,7 +89,8 @@ init([Name, Opts]) ->
 	     end,
     Tls = case proplists:get_value(tls, Opts) of
 	      undefined -> undefined;
-	      TlsOpts when is_list(TlsOpts) ->
+	      TlsOpts0 when is_list(TlsOpts0) ->
+		  TlsOpts = xylan_lib:tls_password(TlsOpts0),
 		  Defaults = [{versions, ['tlsv1.3','tlsv1.2']},
 			      {alpn_preferred_protocols, [<<"http/1.1">>]}],
 		  lists:ukeymerge(1, lists:ukeysort(1, TlsOpts),

@@ -6,6 +6,9 @@ start a server side in the network and the client
 side on a local server and allow users to access
 the local servers over internet in a general way.
 
+For TLS, certificates, client certificates and the API gateway see the
+[user guide](doc/USER_GUIDE.md) and the [sequence diagram](doc/xylan.pdf).
+
 The server need a server config that routes connection
 to the correct local client proxy, there may be more than
 one "local" machine.

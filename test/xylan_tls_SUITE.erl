@@ -48,6 +48,7 @@ all() ->
      {group, tunnel},
      {group, client_cert},
      {group, handshake_limits},
+     {group, rotation},
      {group, gateway}].
 
 groups() ->
@@ -69,6 +70,11 @@ groups() ->
       [cert_clients_relay,
        cert_impersonation_rejected,
        cert_data_channel_bound]},
+     {rotation, [sequence],
+      [key_password,
+       encrypted_server_key,
+       fingerprint_list_client,
+       client_cert_list_server]},
      {handshake_limits, [sequence],
       [handshake_limit_per_ip,
        handshake_timeout]},
@@ -181,6 +187,28 @@ init_per_group(client_cert, Config) ->
     timer:sleep(700),
     [{ports, P}, {procs, [Srv, C1, C2, C3, Echo]} | Config];
 
+init_per_group(rotation, Config) ->
+    %% server key encrypted, password from environment variable
+    P = ports([u1, cntl_tls, data_tls, echo]),
+    Dir = filename:join(?config(priv_dir, Config), "rotation"),
+    {ok, SC, SK, SFP} = xylan_cert:generate("server", [{dir, Dir},
+							{password, "hemligt"}]),
+    os:putenv("XYLAN_TEST_KEY_PW", "hemligt"),
+    {_, _, AFP} = cert(home_a, Config),
+    {_, _, BFP} = cert(home_b, Config),
+    Echo = start_echo(port(echo, P)),
+    Srv = start_srv([{port, [{a, "127.0.0.1", port(u1, P)}]},
+		     {client_port, none}, {data_port, none},
+		     {client_tls_port, port(cntl_tls, P)},
+		     {data_tls_port, port(data_tls, P)},
+		     {tls_options, [{certfile, SC}, {keyfile, SK},
+				    {password, {env, "XYLAN_TEST_KEY_PW"}}]},
+		     {clients,
+		      %% old and new client certificate during rotation
+		      [{"rot", [{client_cert, [AFP, BFP]},
+				{route, [[{dst_port, port(u1, P)}]]}]}]}]),
+    [{ports, P}, {procs, [Srv, Echo]}, {server_fp, SFP},
+     {rotation_dir, Dir} | Config];
 init_per_group(handshake_limits, Config) ->
     P = ports([user, cntl_tls, data_tls]),
     {SC, SK, _} = cert(server, Config),
@@ -389,6 +417,60 @@ cert_data_channel_bound(Config) ->
     after 5000 -> ct:fail(no_user_echo)
     end,
     ssl:close(C).
+
+%%--------------------------------------------------------------------
+%% rotation / key password
+%%--------------------------------------------------------------------
+
+key_password(Config) ->
+    Dir = filename:join(?config(priv_dir, Config), "pw"),
+    {ok, C, K, _} = xylan_cert:generate("pw", [{dir, Dir}, {password, "s3cret"}]),
+    {ok, KeyPem} = file:read_file(K),
+    {_, _} = binary:match(KeyPem, <<"ENCRYPTED">>),
+    PwFile = filename:join(Dir, "pw.txt"),
+    ok = file:write_file(PwFile, <<"s3cret\n">>),
+    [{password, "s3cret"} | _] =
+	xylan_lib:tls_password([{password, {file, PwFile}}, {certfile, C}]),
+    %% the key loads with the password and not without
+    {ok, L} = ssl:listen(0, [{certfile, C}, {keyfile, K}, {password, "s3cret"}]),
+    ssl:close(L),
+    {error, _} = (catch ssl:listen(0, [{certfile, C}, {keyfile, K}])),
+    {'EXIT', {{password_env_not_set, "XYLAN_NO_SUCH_VAR"}, _}} =
+	(catch xylan_lib:tls_password([{password, {env, "XYLAN_NO_SUCH_VAR"}}])),
+    ok.
+
+encrypted_server_key(Config) ->
+    %% the server started with an encrypted key (password from env)
+    {ok, S} = ssl:connect("127.0.0.1", port(cntl_tls, Config),
+			  [{verify, verify_none}], 3000),
+    {ok, Der} = ssl:peercert(S),
+    true = xylan_lib:der_fingerprint(Der) =:= ?config(server_fp, Config),
+    ssl:close(S).
+
+fingerprint_list_client(Config) ->
+    %% client pins old (unknown) and new server fingerprint
+    Old = "sha256:" ++ lists:duplicate(31, "AB:") ++ "AB",
+    Clt = start_clt([{id, "rot"}, {server_port, port(cntl_tls, Config)},
+		     {server_tls, [{fingerprint, [Old, ?config(server_fp, Config)]}
+				   | cert_opts(home_a, Config)]},
+		     {route, [{[{dst_port, ".*"}], [{port, port(echo, Config)}]}]}]),
+    timer:sleep(500),
+    true = user_echo(port(u1, Config)),
+    exit(Clt, shutdown),
+    timer:sleep(100),
+    ok.
+
+client_cert_list_server(Config) ->
+    %% both the old (home-a) and new (home-b) client certificate accepted
+    {ok, CA} = tls_auth(Config, "rot", ?SKEY, ?CKEY, cert, cert_opts(home_a, Config)),
+    ssl:close(CA),
+    {ok, CB} = tls_auth(Config, "rot", ?SKEY, ?CKEY, cert, cert_opts(home_b, Config)),
+    ssl:close(CB),
+    {ok, _, _, _} = xylan_cert:generate("other", [{dir, ?config(rotation_dir, Config)}]),
+    Other = [{certfile, filename:join(?config(rotation_dir, Config), "other.pem")},
+	     {keyfile, filename:join(?config(rotation_dir, Config), "other.key")}],
+    rejected = tls_auth(Config, "rot", ?SKEY, ?CKEY, cert, Other),
+    ok.
 
 %%--------------------------------------------------------------------
 %% handshake limits

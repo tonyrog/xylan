@@ -32,6 +32,8 @@
 -export([cert_fingerprint/1, der_fingerprint/1]).
 -export([tls_client_options/1, tls_check_peer/2]).
 -export([peer_fingerprint/1, normalize_fingerprint/1]).
+-export([normalize_fingerprints/1]).
+-export([tls_password/1]).
 -export([tls_server_options/2]).
 -export([lookup_ip/2]).
 -export([lookup_ifaddr/2]).
@@ -96,9 +98,11 @@ der_fingerprint(Der) ->
 %% With a fingerprint the certificate chain is not validated, instead
 %% the peer certificate must match the pinned fingerprint
 %% (checked with tls_check_peer/2 before anything is sent).
+%% fingerprint may be a single fingerprint or a list (certificate rotation)
 -spec tls_client_options(Conf::list()) ->
-	  {SslOpts::list(), Fingerprint::string()|undefined}.
-tls_client_options(Conf) ->
+	  {SslOpts::list(), Fingerprints::[string()]|undefined}.
+tls_client_options(Conf0) ->
+    Conf = tls_password(Conf0),
     case proplists:get_value(fingerprint, Conf) of
 	undefined ->
 	    {Conf, undefined};
@@ -111,8 +115,34 @@ tls_client_options(Conf) ->
 	    %% verify_fun and the pinned fingerprint decides
 	    {[{verify, verify_peer}, {cacerts, []},
 	      {verify_fun, {AcceptAll, []}} | Opts],
-	     normalize_fingerprint(FP)}
+	     normalize_fingerprints(FP)}
     end.
+
+%% Resolve the key password in ssl options
+%%   {password, "secret"}             - as is
+%%   {password, {env, "VAR"}}         - from environment variable
+%%   {password, {file, "/path"}}      - first line of a file
+tls_password(Opts) ->
+    case proplists:get_value(password, Opts) of
+	{env, Var} ->
+	    case os:getenv(Var) of
+		false -> erlang:error({password_env_not_set, Var});
+		Pw -> set_password(Pw, Opts)
+	    end;
+	{file, File} ->
+	    case file:read_file(File) of
+		{ok, Bin} ->
+		    [Line|_] = binary:split(Bin, [<<"\n">>, <<"\r">>]),
+		    set_password(binary_to_list(Line), Opts);
+		{error, Reason} ->
+		    erlang:error({password_file, File, Reason})
+	    end;
+	_ ->
+	    Opts
+    end.
+
+set_password(Pw, Opts) ->
+    [{password, Pw} | proplists:delete(password, Opts)].
 
 %% Server side, request (but do not require) a client certificate.
 %% The certificate chain is accepted here, the certificate fingerprint
@@ -142,16 +172,23 @@ peer_fingerprint(XSocket) ->
 
 tls_check_peer(_XSocket, undefined) ->
     ok;
-tls_check_peer(XSocket, FP) ->
+tls_check_peer(XSocket, FPs) when is_list(FPs) ->
     case ssl:peercert(xylan_socket:socket(XSocket)) of
 	{ok, Der} ->
-	    case der_fingerprint(Der) of
-		FP -> ok;
-		Other -> {error, {fingerprint_mismatch, Other}}
+	    FP = der_fingerprint(Der),
+	    case lists:member(FP, FPs) of
+		true -> ok;
+		false -> {error, {fingerprint_mismatch, FP}}
 	    end;
 	Error ->
 	    Error
     end.
+
+%% "sha256:.." | ["sha256:..", ...] -> [normalized]
+normalize_fingerprints([C|_] = FP) when is_integer(C) ->
+    [normalize_fingerprint(FP)];
+normalize_fingerprints(FPs) when is_list(FPs) ->
+    [normalize_fingerprint(FP) || FP <- FPs].
 
 normalize_fingerprint(FP) ->
     case string:lowercase(lists:sublist(FP, 7)) of

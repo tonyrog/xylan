@@ -26,6 +26,8 @@
 %%%                          default [Name]
 %%%      {days, Days}        validity, default 3650
 %%%      {usage, server|client|both}  extended key usage, default server
+%%%      {password, Pw}      encrypt the key file (AES-256-CBC), use the same
+%%%                          password as {password,..} in the tls options
 %%%      {force, true}       overwrite existing files
 %%% @end
 %%%-------------------------------------------------------------------
@@ -53,8 +55,16 @@ generate(Name, Options) ->
        true ->
 	    {Der, Key} = make_cert(Hosts, Days, Usage),
 	    CertPem = public_key:pem_encode([{'Certificate', Der, not_encrypted}]),
-	    KeyPem = public_key:pem_encode(
-		       [public_key:pem_entry_encode('ECPrivateKey', Key)]),
+	    KeyEntry =
+		case proplists:get_value(password, Options) of
+		    undefined ->
+			public_key:pem_entry_encode('ECPrivateKey', Key);
+		    Pw ->
+			IV = crypto:strong_rand_bytes(16),
+			public_key:pem_entry_encode('ECPrivateKey', Key,
+						    {{"AES-256-CBC", IV}, Pw})
+		end,
+	    KeyPem = public_key:pem_encode([KeyEntry]),
 	    ok = filelib:ensure_dir(CertFile),
 	    ok = write_file(KeyFile, KeyPem, 8#600),
 	    ok = write_file(CertFile, CertPem, 8#644),
