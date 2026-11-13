@@ -32,7 +32,7 @@ clean:
 %.erl: %.xrl
 	$(ERLC) $<
 
-$(APP_TARGET): $(APP_SRC)
+$(APP_TARGET): $(APP_SRC) $(ERL_SOURCES)
 	sed -e 's;{vsn,.*git};{vsn,"$(VERSION)"};' -e 's;"@@MODULES@@";$(MODULES);' $(APP_SRC) > $(APP_TARGET)
 
 .%.d: ;

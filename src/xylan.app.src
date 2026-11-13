@@ -4,7 +4,7 @@
   {vsn, git},
   {modules, ["@@MODULES@@"]},  
   {registered, []},
-  {applications, [kernel,stdlib,ssl,afunix]},
+  {applications, [kernel,stdlib,crypto,public_key,ssl,afunix]},
   {mod, { xylan_app, []}},
   {env, []}
  ]}.
