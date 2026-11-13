@@ -31,6 +31,7 @@
 -export([connect/2, connect/3, connect/4, connect/5]).
 %% -export([async_connect/2, async_connect/3, async_connect/4]).
 -export([async_socket/2]).
+-export([tls_accept/3]).
 -export([close/1, shutdown/2]).
 -export([send/2, recv/2, recv/3]).
 -export([getopts/2, setopts/2, sockname/1, peername/1]).
@@ -247,6 +248,17 @@ async_socket(Listen, Socket)
     end.
 
     
+%% Upgrade an accepted tcp socket to tls (server side).
+%% Must be called by the controlling process of the socket.
+tls_accept(X, SSLOpts, Timeout) when is_record(X, xylan_socket) ->
+    X1 = X#xylan_socket { opts = SSLOpts ++ X#xylan_socket.opts },
+    case accept_upgrade(X1, [ssl], Timeout) of
+	{ok, X2} ->
+	    {ok, X2#xylan_socket { protocol = [tcp,ssl] }};
+	Error ->
+	    Error
+    end.
+
 accept(X) when is_record(X, xylan_socket) ->
     accept_upgrade(X, X#xylan_socket.protocol, infinity).
 
@@ -458,7 +470,8 @@ ssl_listen_opts() ->
     [versions, verify, verify_fun, 
      fail_if_no_peer_cert, verify_client_once,
      depth, cert, certfile, key, keyfile, 
-     password, cacerts, cacertfile, dh, dhfile, cihpers,
+     password, cacerts, cacertfile, dh, dhfile, cihpers, ciphers,
+     certs_keys, alpn_preferred_protocols, sni_fun, sni_hosts,
      %% deprecated soon 
      ssl_imp,   %% always new!
      %% server
@@ -471,7 +484,8 @@ ssl_connect_opts() ->
     [versions, verify, verify_fun, 
      fail_if_no_peer_cert,
      depth, cert, certfile, key, keyfile, 
-     password, cacerts, cacertfile, dh, dhfile, cihpers,
+     password, cacerts, cacertfile, dh, dhfile, cihpers, ciphers,
+     server_name_indication, customize_hostname_check,
      debug].
 
 

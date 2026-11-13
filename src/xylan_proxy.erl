@@ -165,6 +165,9 @@ handle_cast({socket_options, ASockOpts, BSockOpts}, State) ->
 			    b_socket_options = BSockOpts}};
 
 handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
+    handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts,undefined}, State);
+%% RTls = undefined | {SslOpts, Fingerprint}, tls on B side (server data port)
+handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts,RTls}, State) ->
     LOptions = [{mode,binary},{packet,0},{nodelay,true}] ++ LOpts,
     ?debug("connect: ~p:~w <-> ~p:~w",[LIP,LPort,RIP,RPort]),
     case xylan_socket:connect(LIP,LPort,LOptions,3000) of
@@ -172,7 +175,7 @@ handle_cast({connect,LIP,LPort,LOpts,RIP,RPort,ROpts}, State) ->
 	    ?debug("A is connected"),
 	    ?debug("A peer: ~p", [element(2,xylan_socket:peername(A))]),
 	    ROptions = [{mode,binary},{packet,4},{nodelay,true}] ++ ROpts,
-	    case xylan_socket:connect(RIP,RPort,ROptions,3000) of
+	    case connect_b(RIP,RPort,ROptions,RTls) of
 		{ok,B} ->
 		    ?debug("B is connected"),
 		    ?debug("socket options: A:~w <-> B:~w",
@@ -328,6 +331,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+connect_b(RIP, RPort, ROptions, undefined) ->
+    xylan_socket:connect(RIP, RPort, [tcp], ROptions, 3000);
+connect_b(RIP, RPort, ROptions, {SslOpts, FP}) ->
+    case xylan_socket:connect(RIP, RPort, [tcp,ssl], ROptions++SslOpts, 3000) of
+	{ok, B} ->
+	    case xylan_lib:tls_check_peer(B, FP) of
+		ok -> {ok, B};
+		Error ->
+		    xylan_socket:close(B),
+		    Error
+	    end;
+	Error ->
+	    Error
+    end.
 
 cancel_timer(Timer) when is_reference(Timer) -> 
     erlang:cancel_timer(Timer);

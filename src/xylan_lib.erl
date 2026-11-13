@@ -28,6 +28,9 @@
 -module(xylan_lib).
 
 -export([make_key/1]).
+-export([auth_cred/4, auth_cred_equal/2]).
+-export([cert_fingerprint/1, der_fingerprint/1]).
+-export([tls_client_options/1, tls_check_peer/2]).
 -export([lookup_ip/2]).
 -export([lookup_ifaddr/2]).
 -export([filter_options/2]).
@@ -37,9 +40,89 @@
 -include("xylan_log.hrl").
 
 make_key(Key) when is_binary(Key) ->  Key;
-make_key(Key) when is_integer(Key) -> <<Key:64>>;
+make_key(Key) when is_integer(Key), Key >= 0, Key < (1 bsl 64) ->
+    <<Key:64>>;  %% legacy 64-bit keys
+make_key(Key) when is_integer(Key), Key >= 0, Key < (1 bsl 256) ->
+    <<Key:256>>;
+make_key(Key) when is_integer(Key), Key >= 0 ->
+    binary:encode_unsigned(Key);
 make_key(Key) when is_list(Key) -> erlang:iolist_to_binary(Key);
 make_key(Key) when is_atom(Key) -> erlang:atom_to_binary(Key,latin1).
+
+%% Authentication credential, Role is the side that proves knowledge of Key
+%%   sha         - legacy: sha1(Key ++ Chal)
+%%   hmac_sha256 - hmac-sha256(Key, RoleTag ++ Chal)
+-spec auth_cred(Alg::sha|hmac_sha256, Key::binary(),
+		Role::server|client, Chal::binary()) -> binary().
+auth_cred(sha, Key, _Role, Chal) ->
+    crypto:hash(sha, [Key, Chal]);
+auth_cred(hmac_sha256, Key, server, Chal) ->
+    crypto:mac(hmac, sha256, Key, [<<"xylan-server-v1:">>, Chal]);
+auth_cred(hmac_sha256, Key, client, Chal) ->
+    crypto:mac(hmac, sha256, Key, [<<"xylan-client-v1:">>, Chal]).
+
+%% constant time compare of credentials
+auth_cred_equal(A, B) when is_binary(A), is_binary(B),
+			   byte_size(A) =:= byte_size(B) ->
+    crypto:hash_equals(A, B);
+auth_cred_equal(_, _) ->
+    false.
+
+%% sha256 fingerprint of the first certificate in a PEM file
+%% formatted as "sha256:AB:CD:..."
+cert_fingerprint(CertFile) ->
+    {ok, Bin} = file:read_file(CertFile),
+    [Der|_] = [D || {'Certificate', D, not_encrypted} <-
+			public_key:pem_decode(Bin)],
+    der_fingerprint(Der).
+
+der_fingerprint(Der) ->
+    Hash = crypto:hash(sha256, Der),
+    lists:flatten(
+      ["sha256:" | lists:join($:, [io_lib:format("~2.16.0B",[B]) ||
+				      <<B>> <= Hash])]).
+
+%% Client side tls options from the server_tls config
+%%   [{fingerprint,"sha256:..."} | ssl:tls_client_option()]
+%% With a fingerprint the certificate chain is not validated, instead
+%% the peer certificate must match the pinned fingerprint
+%% (checked with tls_check_peer/2 before anything is sent).
+-spec tls_client_options(Conf::list()) ->
+	  {SslOpts::list(), Fingerprint::string()|undefined}.
+tls_client_options(Conf) ->
+    case proplists:get_value(fingerprint, Conf) of
+	undefined ->
+	    {Conf, undefined};
+	FP ->
+	    Opts = proplists:delete(fingerprint, Conf),
+	    AcceptAll = fun(_Cert, {extension,_}, St) -> {unknown, St};
+			   (_Cert, _Event, St) -> {valid, St}
+			end,
+	    %% verify_peer requires cacerts, the chain is accepted by the
+	    %% verify_fun and the pinned fingerprint decides
+	    {[{verify, verify_peer}, {cacerts, []},
+	      {verify_fun, {AcceptAll, []}} | Opts],
+	     normalize_fingerprint(FP)}
+    end.
+
+tls_check_peer(_XSocket, undefined) ->
+    ok;
+tls_check_peer(XSocket, FP) ->
+    case ssl:peercert(xylan_socket:socket(XSocket)) of
+	{ok, Der} ->
+	    case der_fingerprint(Der) of
+		FP -> ok;
+		Other -> {error, {fingerprint_mismatch, Other}}
+	    end;
+	Error ->
+	    Error
+    end.
+
+normalize_fingerprint(FP) ->
+    case string:lowercase(lists:sublist(FP, 7)) of
+	"sha256:" -> "sha256:" ++ string:uppercase(lists:nthtail(7, FP));
+	_ -> "sha256:" ++ string:uppercase(FP)
+    end.
 
 lookup_ip(Name,Family) ->
     case inet_parse:address(Name) of

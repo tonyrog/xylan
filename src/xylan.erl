@@ -30,7 +30,8 @@
 -export([status/0]).
 -export([set_debug/1]).
 -export([set_module_debug/2]).
--export([generate_key/0]).
+-export([generate_key/0, generate_key/1]).
+-export([cert_fingerprint/1]).
 
 start() ->
     ssl:start(),
@@ -78,9 +79,21 @@ display_prop({K,V}) ->
 	    end,
     io:format("~s=~s ", [Key,Value]).
 
-%% Generate a 64-bit random key used for signing packets
+%% Generate a 64-bit random key used for signing packets (legacy)
 generate_key() ->
+    generate_key(64).
+
+%% Generate a random key, use 256 for clients using tls/hmac_sha256
+%% (big integer, may be written as 16#... in the config file)
+generate_key(64) ->
     <<X:64>> = crypto:strong_rand_bytes(8),
+    X;
+generate_key(256) ->
+    <<X:256>> = crypto:strong_rand_bytes(32),
     X.
+
+%% sha256 fingerprint of server certificate, for client pinning
+cert_fingerprint(CertFile) ->
+    lists:flatten(xylan_lib:cert_fingerprint(CertFile)).
 
     

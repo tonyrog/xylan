@@ -76,6 +76,10 @@
 	  server_name = "",    %%% name of the connected server
 	  server_key  :: binary(),
 	  client_key  :: binary(),
+	  %% undefined = legacy plain tcp + sha auth
+	  %% {SslOpts,Fingerprint} = tls (control and data) + hmac_sha256 auth
+	  tls :: undefined | {list(), string() | undefined},
+	  auth_alg = sha :: sha | hmac_sha256,
 	  ping_interval = ?DEFAULT_PING_INTERVAL :: timeout(),
 	  pong_timeout  = ?DEFAULT_PONG_TIMEOUT  :: timeout(),
 	  session_time :: erlang:timestamp(),
@@ -169,6 +173,12 @@ init(Args0) ->
     ClientKey = xylan_lib:make_key(proplists:get_value(client_key,Args)),
     ServerKey = xylan_lib:make_key(proplists:get_value(server_key,Args)),
     Authtimeout = proplists:get_value(auth_timeout,Args),
+    {Tls,AuthAlg} =
+	case proplists:get_value(server_tls,Args) of
+	    undefined -> {undefined, sha};
+	    TlsConf when is_list(TlsConf) ->
+		{xylan_lib:tls_client_options(TlsConf), hmac_sha256}
+	end,
     ASocketOpts = xylan_lib:filter_options(client,
 					   proplists:get_value(service_socket_options,Args,[])),
     BSocketOpts = xylan_lib:filter_options(client,
@@ -180,6 +190,8 @@ init(Args0) ->
 		 server_port = Port, 
 		 server_key = ServerKey,
 		 client_key = ClientKey,
+		 tls = Tls,
+		 auth_alg = AuthAlg,
 		 route = Route,
 		 ping_interval = PingInterval,
 		 pong_timeout = PongTimeout,
@@ -277,11 +289,15 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 	_Mesg={auth_res,[{id,ServerName},{chal,Chal},{cred,Cred}]} -> 
 	    %% auth and cred from server
 	    ?debug("auth_res: ~p ok", [_Mesg]),
-	    case crypto:hash(sha,[State#state.server_key,State#state.server_chal]) of
-		Cred ->
+	    Alg = State#state.auth_alg,
+	    Cred0 = xylan_lib:auth_cred(Alg, State#state.server_key, server,
+					State#state.server_chal),
+	    case xylan_lib:auth_cred_equal(Cred0, Cred) of
+		true ->
 		    ?debug("credential from server ~p ok", [ServerName]),
 		    cancel_timer(State#state.auth_timer),
-		    Cred1 = crypto:hash(sha,[State#state.client_key,Chal]),
+		    Cred1 = xylan_lib:auth_cred(Alg, State#state.client_key,
+						client, Chal),
 		    send(State#state.server_sock, 
 			 {auth_ack,[{id,State#state.id},{cred,Cred1}]}),
 		    PingTimer = start_timer(State#state.ping_interval,ping),
@@ -289,8 +305,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 					    server_auth = true,
 					    auth_timer = undefined,
 					    ping_timer = PingTimer }};
-		_CredFail ->
-		    ?debug("credential failed"),
+		false ->
+		    ?warning("server credential failed"),
 		    close(State#state.server_sock),
 		    TRef = reconnect_after(State#state.reconnect_interval),
 		    {noreply, State#state { server_sock=undefined, 
@@ -339,7 +355,8 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 			      Pid,
 			      {connect,
 			       LocalIP,LocalPort,State#state.a_socket_options,
-			       RemoteIP,DataPort,State#state.b_socket_options})
+			       RemoteIP,DataPort,State#state.b_socket_options,
+			       State#state.tls})
 		    end,
 		    {noreply, State};
 		false ->
@@ -475,15 +492,19 @@ time_since_ms(T1, T0) ->
     timer:now_diff(T1, T0) div 1000.
 
 connect_server(State) ->
-    case xylan_socket:connect(State#state.server_ip,State#state.server_port,
-			      [{mode,binary},{packet,4},{nodelay,true}],
-			      3000) of
+    case connect_cntl(State) of
 	{ok, Socket} ->
 	    ?debug("server ~p:~p connected",
 			[State#state.server_ip,State#state.server_port]),
-	    %% Chal = crypto:rand_bytes(16),
 	    Chal = crypto:strong_rand_bytes(16),  %% generate challenge
-	    send(Socket, {auth_req,[{id,State#state.id},{chal,Chal}]}),
+	    AuthReq = case State#state.auth_alg of
+			  sha ->  %% legacy format
+			      {auth_req,[{id,State#state.id},{chal,Chal}]};
+			  Alg ->
+			      {auth_req,[{id,State#state.id},{chal,Chal},
+					 {alg,Alg}]}
+		      end,
+	    send(Socket, AuthReq),
 	    xylan_socket:setopts(Socket, [{active, once}]),
 	    Timer = start_timer(State#state.auth_timeout, auth_timeout),
 	    {T,C,E} = xylan_socket:tags(Socket),
@@ -499,6 +520,31 @@ connect_server(State) ->
 	    State#state { reconnect_timer=Timer }
     end.
     
+connect_cntl(State) ->
+    Opts = [{mode,binary},{packet,4},{nodelay,true}],
+    IP = State#state.server_ip,
+    Port = State#state.server_port,
+    case State#state.tls of
+	undefined ->
+	    xylan_socket:connect(IP, Port, [tcp], Opts, 3000);
+	{SslOpts, FP} ->
+	    case xylan_socket:connect(IP, Port, [tcp,ssl],
+				      Opts ++ SslOpts, 3000) of
+		{ok, Socket} ->
+		    case xylan_lib:tls_check_peer(Socket, FP) of
+			ok ->
+			    {ok, Socket};
+			Error ->
+			    ?error("server ~p:~p certificate rejected ~p",
+				   [IP, Port, Error]),
+			    close(Socket),
+			    Error
+		    end;
+		Error ->
+		    Error
+	    end
+    end.
+
 close_server(State) ->
     close(State#state.server_sock),
     cancel_timer(State#state.auth_timer),
