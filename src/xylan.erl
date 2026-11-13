@@ -32,6 +32,9 @@
 -export([set_module_debug/2]).
 -export([generate_key/0, generate_key/1]).
 -export([cert_fingerprint/1]).
+-export([generate_cert/1, generate_cert/2]).
+-export([generate_api_key/1, generate_api_key/2]).
+-export([revoke_api_key/1, list_api_keys/0]).
 
 start() ->
     ssl:start(),
@@ -91,6 +94,51 @@ generate_key(64) ->
 generate_key(256) ->
     <<X:256>> = crypto:strong_rand_bytes(32),
     X.
+
+%% Generate a new api key. If api_key_file is configured the key is
+%% stored there, otherwise the config entry is printed.
+%% Options: {expires,{Y,M,D}}, {allow,[GatewayName]}
+%% The key itself is only shown once.
+generate_api_key(Name) ->
+    generate_api_key(Name, []).
+
+generate_api_key(Name, Options) ->
+    case xylan_apikey:add_key(Name, Options) of
+	{ok, Key, _Entry} ->
+	    io:format("api key (shown once): ~s\n", [Key]),
+	    io:format("stored in ~s\n",
+		      [application:get_env(xylan, api_key_file, "")]),
+	    ok;
+	{error, no_api_key_file} ->
+	    {Key, Id, Hash} = xylan_apikey:generate(),
+	    io:format("api key (shown once): ~s\n", [Key]),
+	    io:format("add to {api_keys, [...]} in the config:\n  ~p\n",
+		      [{Id, [{name,Name},{hash,Hash}|Options]}]),
+	    ok
+    end.
+
+revoke_api_key(Id) ->
+    xylan_apikey:revoke(Id).
+
+list_api_keys() ->
+    lists:foreach(fun({Id, Props}) -> io:format("~s ~p\n", [Id, Props]) end,
+		  xylan_apikey:list()).
+
+%% Generate a self signed certificate <Dir>/<Name>.pem + <Dir>/<Name>.key
+%% Options: {dir,Dir} {hosts,[DnsName|IP]} {days,Days} {force,true}
+%% Prints the fingerprint used by clients for pinning (server_tls).
+generate_cert(Name) ->
+    generate_cert(Name, []).
+
+generate_cert(Name, Options) ->
+    case xylan_cert:generate(Name, Options) of
+	{ok, CertFile, KeyFile, FP} ->
+	    io:format("certificate: ~s\nkey:         ~s\nfingerprint: ~s\n",
+		      [CertFile, KeyFile, FP]),
+	    ok;
+	Error ->
+	    Error
+    end.
 
 %% sha256 fingerprint of server certificate, for client pinning
 cert_fingerprint(CertFile) ->

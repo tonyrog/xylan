@@ -47,6 +47,8 @@
 -define(DEFAULT_DATA_PORT, 29391).   %% client proxy data port
 %% tls ports are disabled by default, set client_tls_port/data_tls_port
 -define(DEFAULT_TLS_VERSIONS, ['tlsv1.3','tlsv1.2']).
+-define(DEFAULT_MAX_TLS_HANDSHAKES, 64).        %% concurrent, total
+-define(DEFAULT_MAX_TLS_HANDSHAKES_PER_IP, 8).  %% concurrent, per peer ip
 -define(DEFAULT_PORT, 46122).        %% user connect port
 -define(DEFAULT_AUTH_TIMEOUT, 5000). %% timeout for authentication packet
 -define(DEFAULT_DATA_TIMEOUT, 5000). %% timeout for proxy data connection
@@ -97,6 +99,7 @@
 	  a_socket_options :: list(),  %%
 	  b_socket_options :: list(),  %%
 	  require_tls = false :: boolean(), %% only tls+hmac_sha256 accepted
+	  client_cert :: undefined | string(), %% pinned client cert fingerprint
 	  pid :: pid(),              %% client process
 	  mon :: reference(),        %% monitor of above
 	  route :: [[route_config()]]  %% config
@@ -120,6 +123,11 @@
 	  data_tls_port :: integer() | none,
 	  data_tls_ref  :: socket_ref() | undefined,
 	  tls_options = [] :: [ssl:tls_server_option()],
+	  %% ongoing tls handshakes Mon => PeerIP
+	  handshakes = #{} :: #{reference() => inet:ip_address() | undefined},
+	  max_handshakes = ?DEFAULT_MAX_TLS_HANDSHAKES :: non_neg_integer(),
+	  max_handshakes_per_ip = ?DEFAULT_MAX_TLS_HANDSHAKES_PER_IP ::
+	    non_neg_integer(),
 	  user_socks :: [{xylan_socket(),socket_ref()}], %% listen sockets
 	  user_ports :: user_ports(),
 	  clients = []  :: [#client{}],
@@ -196,8 +204,6 @@ init(Args0) ->
 		    proplists:get_value(client_tls_port,Args,none)),
     DataTlsPort = validate_port_or_none(data_tls_port,
 		    proplists:get_value(data_tls_port,Args,none)),
-    TlsOptions  = validate_tls_options(CntlTlsPort, DataTlsPort,
-				      proplists:get_value(tls_options,Args,[])),
     UserPorts   = validate_listen_ports(proplists:get_value(port,Args,?DEFAULT_PORT)),
     ServerID    = proplists:get_value(id,Args,""),
     AuthTimeout = proplists:get_value(auth_timeout,Args,?DEFAULT_AUTH_TIMEOUT),
@@ -205,12 +211,20 @@ init(Args0) ->
     ASocketOpts = xylan_lib:filter_options(server,proplists:get_value(user_socket_options,Args,[])),
     BSocketOpts = xylan_lib:filter_options(server,proplists:get_value(client_socket_options,Args,[])),
     ClientList = validate_clients(get_client_list(Args), UserPorts),
+    AnyClientCert = lists:any(fun({_,CC}) ->
+				      proplists:get_value(client_cert,CC) =/=
+					  undefined
+			      end, ClientList),
+    TlsOptions  = validate_tls_options(CntlTlsPort, DataTlsPort,
+				       proplists:get_value(tls_options,Args,[]),
+				       AnyClientCert),
     
     Clients =
 	[begin
 	     SKey=proplists:get_value(server_key,ClientConf),
 	     CKey=proplists:get_value(client_key,ClientConf),
 	     RequireTls=proplists:get_value(require_tls,ClientConf,false),
+	     ClientCert=proplists:get_value(client_cert,ClientConf),
 	     if RequireTls, CntlTlsPort =:= none ->
 		     ?warning("client ~s require_tls but no client_tls_port",
 			      [ClientID]);
@@ -228,7 +242,8 @@ init(Args0) ->
 		       {client_key,CKey},
 		       {auth_timeout,AuthTimeout},
 		       {ping_timeout,PingTimeout},
-		       {require_tls,RequireTls}
+		       {require_tls,RequireTls},
+		       {client_cert,ClientCert}
 		      ],
 	     gen_server:cast(CPid, {set_config,Config}),
 	     #client { id = ClientID,
@@ -237,6 +252,7 @@ init(Args0) ->
 		       auth_timeout = AuthTimeout,
 		       ping_timeout = PingTimeout,
 		       require_tls = RequireTls,
+		       client_cert = ClientCert,
 		       a_socket_options = ASocketOpts1,
 		       b_socket_options = BSocketOpts1,
 		       pid = CPid,
@@ -257,6 +273,12 @@ init(Args0) ->
 		 data_tls_sock=DataTlsSock, data_tls_port=DataTlsPort,
 		 data_tls_ref=DataTlsRef,
 		 tls_options = TlsOptions,
+		 max_handshakes =
+		     proplists:get_value(max_tls_handshakes, Args,
+					 ?DEFAULT_MAX_TLS_HANDSHAKES),
+		 max_handshakes_per_ip =
+		     proplists:get_value(max_tls_handshakes_per_ip, Args,
+					 ?DEFAULT_MAX_TLS_HANDSHAKES_PER_IP),
 		 user_socks=UserSocks, user_ports = UserPorts,
 		 clients = Clients,
 		 auth_timeout = AuthTimeout,
@@ -364,13 +386,16 @@ handle_cast(Msg={route,SessionKey,RouteInfo,Proxy}, State) ->
 	    {noreply, State}
     end;
 handle_cast({session_bound,SessionKey,Tls}, State) ->
+    handle_cast({session_bound,SessionKey,Tls,undefined}, State);
+handle_cast({session_bound,SessionKey,Tls,ClientCert}, State) ->
     case lists:keyfind(SessionKey, 3, State#state.proxy_list) of
 	false ->
 	    ?debug("session_bound: session gone", []),
 	    {noreply, State};
 	{Pid,Mon,SessionKey,_} ->
+	    %% data connection must use same channel type (and client cert)
 	    Ls = lists:keyreplace(SessionKey, 3, State#state.proxy_list,
-				  {Pid,Mon,SessionKey,Tls}),
+				  {Pid,Mon,SessionKey,{Tls,ClientCert}}),
 	    {noreply, State#state { proxy_list = Ls }}
     end;
 handle_cast(_Msg, State) ->
@@ -420,8 +445,7 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	    State1 = State#state { cntl_tls_ref = Ref1 },
 	    case xylan_socket:async_socket(State#state.cntl_tls_sock,Socket) of
 		{ok, XSocket} ->
-		    start_tls_handshake(cntl, XSocket, State1),
-		    {noreply, State1};
+		    {noreply, start_tls_handshake(cntl, XSocket, State1)};
 		_Error ->
 		    ?error("inet_accept: ~p", [_Error]),
 		    {noreply, State1}
@@ -432,8 +456,7 @@ handle_info({inet_async, Listen, Ref, {ok,Socket}} = _Msg, State) ->
 	    State1 = State#state { data_tls_ref = Ref1 },
 	    case xylan_socket:async_socket(State#state.data_tls_sock,Socket) of
 		{ok, XSocket} ->
-		    start_tls_handshake(data, XSocket, State1),
-		    {noreply, State1};
+		    {noreply, start_tls_handshake(data, XSocket, State1)};
 		_Error ->
 		    ?error("inet_accept: ~p", [_Error]),
 		    {noreply, State1}
@@ -515,13 +538,22 @@ handle_info(_Info={Tag,Socket,Data}, State) when
 		    ?warning("no user found id=~p",[Data]),
 		    xylan_socket:close(XSocket),
 		    {noreply, State#state { data_list=Ls }};
-		{Proxy,Mon,_Data,Tls} ->
+		{Proxy,Mon,_Data,{Tls,CC}} when
+		      CC =:= undefined; Tls =:= true ->
 		    %% session is routed and data channel type match
-		    ProxyList = lists:keydelete(Data,3,State#state.proxy_list),
+		    case CC =:= undefined orelse
+			xylan_lib:peer_fingerprint(XSocket) =:= CC of
+			true ->
+			    ProxyList = lists:keydelete(Data,3,State#state.proxy_list),
 		    erlang:demonitor(Mon, [flush]),
 		    xylan_socket:controlling_process(XSocket, Proxy),
 		    gen_server:cast(Proxy, {set_b,XSocket}),
 		    {noreply, State#state { proxy_list = ProxyList,data_list=Ls }};
+			false ->
+			    ?warning("data channel client certificate mismatch"),
+			    xylan_socket:close(XSocket),
+			    {noreply, State#state { data_list=Ls }}
+		    end;
 		{_Proxy,_Mon,_Data,Bound} ->
 		    %% keep the session, the real client may still connect
 		    ?warning("data channel mismatch session=~w data_tls=~w",
@@ -565,6 +597,10 @@ handle_info({timeout,TRef,data_timeout}, State) ->
 	    {noreply, State#state { data_list = Ls}}
     end;
 
+handle_info({'DOWN',Ref,process,_Pid,_Reason}, State) when
+      is_map_key(Ref, State#state.handshakes) ->
+    {noreply, State#state { handshakes = maps:remove(Ref,
+						     State#state.handshakes) }};
 handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) ->
     ?debug("got: ~p\n", [_Info]),
     case lists:keytake(Ref, 2, State#state.proxy_list) of
@@ -586,7 +622,8 @@ handle_info(_Info={'DOWN',Ref,process,_Pid,_Reason}, State) ->
 			       {client_key,C#client.client_key},
 			       {auth_timeout,C#client.auth_timeout},
 			       {ping_timeout,C#client.ping_timeout},
-			       {require_tls,C#client.require_tls}
+			       {require_tls,C#client.require_tls},
+			       {client_cert,C#client.client_cert}
 			      ],
 		    gen_server:cast(CPid,{set_config,Config}),
 		    {noreply, State#state { clients = Clients1 }}
@@ -664,18 +701,42 @@ add_data_socket(XSocket, Tls, State) ->
 %% peer can not block the server. The handshake is limited by auth_timeout
 %% and the result is sent back as {tls_accepted, Kind, XSocket}
 start_tls_handshake(Kind, XSocket, State) ->
-    Srv = self(),
-    Opts = State#state.tls_options,
-    Timeout = State#state.auth_timeout,
-    Pid = spawn(fun() -> tls_handshake(Srv, Kind, XSocket, Opts, Timeout) end),
-    case xylan_socket:controlling_process(XSocket, Pid) of
-	ok ->
-	    Pid ! {go, Srv};
-	_Error ->
-	    ?warning("tls handshake: controlling_process ~p", [_Error]),
-	    exit(Pid, kill),
-	    xylan_socket:close(XSocket)
+    PeerIP = case xylan_socket:peername(XSocket) of
+		 {ok,{IP,_}} -> IP;
+		 _ -> undefined
+	     end,
+    Hs = State#state.handshakes,
+    NumIP = length([ok || P <- maps:values(Hs), P =:= PeerIP]),
+    if map_size(Hs) >= State#state.max_handshakes ->
+	    ?warning("tls handshake limit reached, ~s rejected",
+		     [format_ip(PeerIP)]),
+	    xylan_socket:close(XSocket),
+	    State;
+       NumIP >= State#state.max_handshakes_per_ip ->
+	    ?warning("tls handshake limit per ip reached, ~s rejected",
+		     [format_ip(PeerIP)]),
+	    xylan_socket:close(XSocket),
+	    State;
+       true ->
+	    Srv = self(),
+	    Opts = State#state.tls_options,
+	    Timeout = State#state.auth_timeout,
+	    {Pid,Mon} = spawn_monitor(fun() -> tls_handshake(Srv, Kind, XSocket,
+							     Opts, Timeout)
+				      end),
+	    case xylan_socket:controlling_process(XSocket, Pid) of
+		ok ->
+		    Pid ! {go, Srv};
+		_Error ->
+		    ?warning("tls handshake: controlling_process ~p", [_Error]),
+		    exit(Pid, kill),
+		    xylan_socket:close(XSocket)
+	    end,
+	    State#state { handshakes = Hs#{ Mon => PeerIP } }
     end.
+
+format_ip(undefined) -> "?";
+format_ip(IP) -> inet:ntoa(IP).
 
 tls_handshake(Srv, Kind, XSocket, Opts, Timeout) ->
     receive
@@ -709,6 +770,22 @@ auth_client(ID, Tls, XSocket, Message, State) ->
 	    ?warning("client ~p requires tls, rejected",[ID]),
 	    xylan_socket:close(XSocket),
 	    {noreply, State};
+	Client when Client#client.client_cert =/= undefined,
+		    is_pid(Client#client.pid) ->
+	    case xylan_lib:peer_fingerprint(XSocket) of
+		FP when FP =:= Client#client.client_cert ->
+		    ?info("client ~p connected (client cert ok)\n", [ID]),
+		    xylan_socket:controlling_process(XSocket, Client#client.pid),
+		    gen_server:cast(Client#client.pid,
+				    {auth_socket, XSocket, Tls, Message}),
+		    {noreply, State};
+		FP ->
+		    ?warning("client ~p bad client certificate ~s, rejected",
+			     [ID, if FP =:= undefined -> "(none)";
+				     true -> FP end]),
+		    xylan_socket:close(XSocket),
+		    {noreply, State}
+	    end;
 	Client when is_pid(Client#client.pid) ->
 	    ?info("client ~p connected (tls=~w)\n", [ID, Tls]),
 	    xylan_socket:controlling_process(XSocket, Client#client.pid),
@@ -728,9 +805,10 @@ validate_port_or_none(Name, Port) ->
     ?error("bad ~s value ~p", [Name, Port]),
     erlang:error(bad_port).
 
-validate_tls_options(none, none, Opts) ->
+validate_tls_options(none, none, Opts, _AnyClientCert) ->
     Opts;
-validate_tls_options(_, _, Opts) ->
+validate_tls_options(_, _, Opts0, AnyClientCert) ->
+    Opts = xylan_lib:tls_server_options(Opts0, AnyClientCert),
     HasCert = lists:any(fun(K) -> proplists:is_defined(K, Opts) end,
 			[certfile, cert, certs_keys]),
     if not HasCert ->
@@ -779,12 +857,28 @@ validate_clients(Clients, UserPorts) ->
     [validate_client(C,UserPorts) || C <- Clients].
 
 validate_client({Name,C}, UserPorts) ->
-    SKey = validate_key(server_key,proplists:get_value(server_key, C)),
-    CKey = validate_key(client_key,proplists:get_value(client_key, C)),
+    ClientCert = case proplists:get_value(client_cert, C) of
+		     undefined -> undefined;
+		     FP when is_list(FP) -> xylan_lib:normalize_fingerprint(FP);
+		     _ -> ?error("client ~s bad client_cert value", [Name]),
+			  erlang:error(bad_client_cert)
+		 end,
+    %% keys are optional when the client is authenticated by certificate
+    KeysOptional = ClientCert =/= undefined,
+    SKey = validate_key(server_key,proplists:get_value(server_key, C),
+			KeysOptional),
+    CKey = validate_key(client_key,proplists:get_value(client_key, C),
+			KeysOptional),
+    if (SKey =:= undefined) =/= (CKey =:= undefined) ->
+	    ?error("client ~s both or none of server_key/client_key", [Name]),
+	    erlang:error(bad_key_format);
+       true -> ok
+    end,
     Route = validate_route(proplists:get_value(route,C,[]), UserPorts),
     UOpts = proplists:get_value(user_socket_options,C,[]),
     COpts = proplists:get_value(client_socket_options,C,[]),
     RequireTls = case proplists:get_value(require_tls,C,false) of
+		     _ when ClientCert =/= undefined -> true;
 		     B when is_boolean(B) -> B;
 		     _ -> ?error("client ~s bad require_tls value", [Name]),
 			  erlang:error(bad_require_tls)
@@ -792,12 +886,18 @@ validate_client({Name,C}, UserPorts) ->
     C1 = {Name,[{server_key, SKey},
 		{client_key, CKey},
 		{require_tls, RequireTls},
+		{client_cert, ClientCert},
 		{route, Route},
 		{user_socket_options, UOpts},
 		{client_socket_options, COpts}]},
     C1.
 
-validate_key(KeyType,Key) ->
+validate_key(_KeyType,undefined,true) ->
+    undefined;
+validate_key(KeyType,undefined,false) ->
+    ?error("~s missing\n", [KeyType]),
+    erlang:error(bad_key_format);
+validate_key(KeyType,Key,_Optional) ->
     try xylan_lib:make_key(Key) of
 	BinKey -> BinKey
     catch

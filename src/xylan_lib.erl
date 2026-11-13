@@ -31,6 +31,8 @@
 -export([auth_cred/4, auth_cred_equal/2]).
 -export([cert_fingerprint/1, der_fingerprint/1]).
 -export([tls_client_options/1, tls_check_peer/2]).
+-export([peer_fingerprint/1, normalize_fingerprint/1]).
+-export([tls_server_options/2]).
 -export([lookup_ip/2]).
 -export([lookup_ifaddr/2]).
 -export([filter_options/2]).
@@ -39,6 +41,7 @@
 
 -include("xylan_log.hrl").
 
+make_key(undefined) -> undefined;
 make_key(Key) when is_binary(Key) ->  Key;
 make_key(Key) when is_integer(Key), Key >= 0, Key < (1 bsl 64) ->
     <<Key:64>>;  %% legacy 64-bit keys
@@ -54,6 +57,8 @@ make_key(Key) when is_atom(Key) -> erlang:atom_to_binary(Key,latin1).
 %%   hmac_sha256 - hmac-sha256(Key, RoleTag ++ Chal)
 -spec auth_cred(Alg::sha|hmac_sha256, Key::binary(),
 		Role::server|client, Chal::binary()) -> binary().
+auth_cred(cert, _Key, _Role, _Chal) ->
+    <<>>;  %% authenticated by tls client certificate
 auth_cred(sha, Key, _Role, Chal) ->
     crypto:hash(sha, [Key, Chal]);
 auth_cred(hmac_sha256, Key, server, Chal) ->
@@ -64,7 +69,11 @@ auth_cred(hmac_sha256, Key, client, Chal) ->
 %% constant time compare of credentials
 auth_cred_equal(A, B) when is_binary(A), is_binary(B),
 			   byte_size(A) =:= byte_size(B) ->
-    crypto:hash_equals(A, B);
+    try crypto:hash_equals(A, B)
+    catch
+	error:undef ->  %% before OTP 25
+	    crypto:exor(A, B) =:= <<0:(byte_size(A))/unit:8>>
+    end;
 auth_cred_equal(_, _) ->
     false.
 
@@ -103,6 +112,32 @@ tls_client_options(Conf) ->
 	    {[{verify, verify_peer}, {cacerts, []},
 	      {verify_fun, {AcceptAll, []}} | Opts],
 	     normalize_fingerprint(FP)}
+    end.
+
+%% Server side, request (but do not require) a client certificate.
+%% The certificate chain is accepted here, the certificate fingerprint
+%% is checked per client (client_cert) when the client presents its id.
+tls_server_options(Opts, false) ->
+    Opts;
+tls_server_options(Opts, true) ->
+    case proplists:is_defined(verify, Opts) of
+	true ->
+	    Opts;  %% user has own verify setup
+	false ->
+	    AcceptAll = fun(_Cert, {extension,_}, St) -> {unknown, St};
+			   (_Cert, _Event, St) -> {valid, St}
+			end,
+	    [{verify, verify_peer}, {fail_if_no_peer_cert, false},
+	     {cacerts, []}, {verify_fun, {AcceptAll, []}} | Opts]
+    end.
+
+%% fingerprint of the peer certificate or undefined
+peer_fingerprint(XSocket) ->
+    try ssl:peercert(xylan_socket:socket(XSocket)) of
+	{ok, Der} -> der_fingerprint(Der);
+	_ -> undefined
+    catch
+	_:_ -> undefined
     end.
 
 tls_check_peer(_XSocket, undefined) ->

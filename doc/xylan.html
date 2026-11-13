@@ -1,0 +1,159 @@
+<!doctype html><html><head><meta charset="utf-8"><title>xylan</title>
+<style>
+@page { size: A4; margin: 12mm 11mm; }
+body { font-family: Helvetica, Arial, sans-serif; color: #111; margin: 0; }
+h1 { font-weight: 300; font-size: 30px; text-align: center; margin: 0 0 2px 0; }
+h1 small { font-size: 14px; color: #777; }
+h2 { font-size: 16px; margin: 10px 0 6px 0; border-bottom: 2px solid #3ac43a; padding-bottom: 2px; }
+h3 { font-size: 12.5px; margin: 10px 0 3px 0; }
+p, li, td { font-size: 10.5px; line-height: 1.38; }
+ul { margin: 2px 0 4px 0; padding-left: 16px; }
+.page { page-break-after: always; }
+.page:last-child { page-break-after: auto; }
+svg text.lbl { font-size: 8.6px; }
+svg text.sub { font-size: 8px; fill: #444; }
+svg text.note { font-size: 7.9px; font-style: italic; }
+svg text.sec { font-size: 9.5px; font-weight: bold; }
+svg text.box { font-size: 9.5px; font-weight: bold; }
+svg text.dtxt { font-size: 9.5px; }
+svg text.mono { font-size: 9px; font-family: Menlo, Consolas, monospace; }
+svg .leg text { font-size: 8.4px; }
+pre { font-family: Menlo, Consolas, monospace; font-size: 8.6px; background: #f6f6f6;
+      border-left: 3px solid #36c9ef; padding: 5px 7px; margin: 3px 0 6px 0; line-height: 1.3;
+      white-space: pre-wrap; }
+table { border-collapse: collapse; width: 100%; margin: 3px 0 6px 0; }
+td, th { border: 1px solid #ddd; padding: 3px 5px; vertical-align: top; text-align: left; }
+th { font-size: 10px; background: #f3f3f3; }
+code { font-family: Menlo, Consolas, monospace; font-size: 9.4px; background: #f3f3f3; padding: 0 2px; }
+.cols { display: flex; gap: 12px; } .cols > div { flex: 1; min-width: 0; }
+.key { font-family: Menlo, Consolas, monospace; font-size: 11px; text-align: center; margin: 4px 0; }
+.key span { padding: 1px 3px; border-radius: 3px; }
+</style></head><body><div class="page"><h1>xylan (proxy wedding) <small>2026 · tls · api keys</small></h1><svg viewBox="0 0 745 937" width="100%">
+<g transform="translate(8,22)" class="leg">
+ <line x1="0" y1="0" x2="26" y2="0" stroke="#111" stroke-dasharray="4 3"/><text x="31" y="3">connect</text>
+ <line x1="80" y1="-1.5" x2="106" y2="-1.5" stroke="#111"/><line x1="80" y1="1.5" x2="106" y2="1.5" stroke="#111"/><text x="111" y="3">control channel</text>
+ <line x1="200" y1="-1.5" x2="226" y2="-1.5" stroke="#f5a623" stroke-width="1.3"/><line x1="200" y1="1.5" x2="226" y2="1.5" stroke="#f5a623" stroke-width="1.3"/><text x="231" y="3">user data (end-to-end TLS to GATEWAY)</text>
+ <g transform="translate(416,-7)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><text x="426" y="3">inside xylan TLS (tunnel)</text>
+ <text x="560" y="3">Sk session key · Ri route info</text>
+</g><line x1="40" y1="79" x2="40" y2="937" stroke="#999" stroke-width="1"/><rect x="3" y="61" width="74" height="18" fill="#f5a623" stroke="#333" stroke-width="0.7"/><text x="40" y="74" text-anchor="middle" class="box">USER</text><line x1="135" y1="79" x2="135" y2="937" stroke="#999" stroke-width="1"/><rect x="98" y="61" width="74" height="18" fill="#3ac43a" stroke="#333" stroke-width="0.7"/><text x="135" y="74" text-anchor="middle" class="box">SERVER</text><line x1="222" y1="79" x2="222" y2="937" stroke="#999" stroke-width="1"/><rect x="185" y="61" width="74" height="18" fill="#3ac43a" stroke="#333" stroke-width="0.7"/><text x="222" y="74" text-anchor="middle" class="box">SESSION</text><line x1="300" y1="362" x2="300" y2="937" stroke="#999" stroke-width="1"/><line x1="408" y1="79" x2="408" y2="937" stroke="#999" stroke-width="1"/><rect x="371" y="61" width="74" height="18" fill="#36c9ef" stroke="#333" stroke-width="0.7"/><text x="408" y="74" text-anchor="middle" class="box">CLIENT</text><line x1="486" y1="516" x2="486" y2="937" stroke="#999" stroke-width="1"/><line x1="590" y1="79" x2="590" y2="937" stroke="#999" stroke-width="1"/><rect x="553" y="61" width="74" height="18" fill="#9b6bff" stroke="#333" stroke-width="0.7"/><text x="590" y="74" text-anchor="middle" class="box">GATEWAY</text><line x1="705" y1="79" x2="705" y2="937" stroke="#999" stroke-width="1"/><rect x="668" y="61" width="74" height="18" fill="#f0452a" stroke="#333" stroke-width="0.7"/><text x="705" y="74" text-anchor="middle" class="box">SERVICE</text><rect x="4" y="95" width="737" height="17" fill="#f3f3f3" rx="3"/><text x="10" y="108" class="sec">1  Control channel   CLIENT ⇒ SERVER   (TLS, pinned certificates, HMAC-SHA256 and/or client certificate)</text><line x1="408" y1="130" x2="143" y2="130" stroke="#111" stroke-width="1.1" stroke-dasharray="4 3"/><path d="M137 130 l8 -4 v8 z" fill="#111"/><text x="293.34000000000003" y="125" text-anchor="middle" class="lbl">connect client_tls_port 29392 + TLS handshake</text><g transform="translate(149.84000000000003,118)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><text x="402" y="145" text-anchor="end" class="note" fill="#555">server certificate checked against pinned sha256 fingerprint</text><text x="141" y="158" text-anchor="start" class="note" fill="#555">optional client certificate (home.pem) presented in the same handshake</text><line x1="408" y1="177.5" x2="143" y2="177.5" stroke="#111" stroke-width="1.1"/><line x1="408" y1="180.5" x2="143" y2="180.5" stroke="#111" stroke-width="1.1"/><path d="M137 179 l8 -4 v8 z" fill="#111"/><text x="293.34000000000003" y="174" text-anchor="middle" class="lbl">auth_req {id, chal, alg=hmac_sha256 | cert}</text><g transform="translate(155.64000000000004,167)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><line x1="135" y1="202" x2="214" y2="202" stroke="#111" stroke-width="1.2"/><path d="M220 202 l-8 -4 v8 z" fill="#111"/><text x="178.5" y="197" text-anchor="middle" class="lbl">auth_socket</text><text x="45" y="217" text-anchor="start" class="note" fill="#555">old port with require_tls, or client_cert fingerprint ≠ id → closed before handover</text><line x1="222" y1="236.5" x2="400" y2="236.5" stroke="#111" stroke-width="1.1"/><line x1="222" y1="239.5" x2="400" y2="239.5" stroke="#111" stroke-width="1.1"/><path d="M406 238 l-8 -4 v8 z" fill="#111"/><text x="315.0" y="233" text-anchor="middle" class="lbl">auth_res {chal', HMAC(Ks, "xylan-server-v1:"‖chal)}</text><g transform="translate(154.1,226)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><line x1="408" y1="259.5" x2="230" y2="259.5" stroke="#111" stroke-width="1.1"/><line x1="408" y1="262.5" x2="230" y2="262.5" stroke="#111" stroke-width="1.1"/><path d="M224 261 l8 -4 v8 z" fill="#111"/><text x="315.0" y="256" text-anchor="middle" class="lbl">auth_ack {HMAC(Kc, "xylan-client-v1:"‖chal')}</text><g transform="translate(171.5,249)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><text x="228" y="276" text-anchor="start" class="note" fill="#555">alg=cert: creds empty, identity = client certificate (no shared keys needed)</text><text x="228" y="289" text-anchor="start" class="note" fill="#555">new socket replaces the active one only after successful auth (no kick-out by id)</text><rect x="4" y="301" width="737" height="17" fill="#f3f3f3" rx="3"/><text x="10" y="314" class="sec">2  User connects   USER → SERVER user port (e.g. 11443)</text><line x1="40" y1="336" x2="127" y2="336" stroke="#111" stroke-width="1.1" stroke-dasharray="4 3"/><path d="M133 336 l-8 -4 v8 z" fill="#111"/><text x="87.5" y="331" text-anchor="middle" class="lbl">connect A</text><rect x="270" y="345" width="60" height="17" rx="8" fill="#3ac43a" stroke="#333" stroke-width="0.7"/><text x="300" y="357" text-anchor="middle" class="box">PROXY</text><line x1="135" y1="375" x2="292" y2="375" stroke="#111" stroke-width="1.2"/><path d="M298 375 l-8 -4 v8 z" fill="#111"/><text x="184.5" y="370" text-anchor="middle" class="lbl">start(Sk), set A</text><line x1="40" y1="396.5" x2="292" y2="396.5" stroke="#f5a623" stroke-width="1.3"/><line x1="40" y1="399.5" x2="292" y2="399.5" stroke="#f5a623" stroke-width="1.3"/><path d="M298 398 l-8 -4 v8 z" fill="#f5a623"/><text x="105.0" y="393" text-anchor="middle" class="lbl">TLS ClientHello (initial data)</text><line x1="300" y1="421" x2="143" y2="421" stroke="#111" stroke-width="1.2"/><path d="M137 421 l8 -4 v8 z" fill="#111"/><text x="258.75" y="416" text-anchor="middle" class="lbl">route Ri</text><line x1="135" y1="444" x2="214" y2="444" stroke="#111" stroke-width="1.2"/><path d="M220 444 l-8 -4 v8 z" fill="#111"/><text x="178.5" y="439" text-anchor="middle" class="lbl">route {29391,29393}, Sk, Ri</text><line x1="222" y1="467" x2="143" y2="467" stroke="#111" stroke-width="1.2"/><path d="M137 467 l8 -4 v8 z" fill="#111"/><text x="178.5" y="462" text-anchor="middle" class="lbl">session_bound(Sk, tls=true)</text><line x1="222" y1="488.5" x2="400" y2="488.5" stroke="#111" stroke-width="1.1"/><line x1="222" y1="491.5" x2="400" y2="491.5" stroke="#111" stroke-width="1.1"/><path d="M406 490 l-8 -4 v8 z" fill="#111"/><text x="333.6" y="485" text-anchor="middle" class="lbl">route {29393, Sk, Ri}</text><g transform="translate(259.70000000000005,478)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><rect x="456" y="499" width="60" height="17" rx="8" fill="#36c9ef" stroke="#333" stroke-width="0.7"/><text x="486" y="511" text-anchor="middle" class="box">PROXY</text><line x1="408" y1="529" x2="478" y2="529" stroke="#111" stroke-width="1.2"/><path d="M484 529 l-8 -4 v8 z" fill="#111"/><text x="447.0" y="524" text-anchor="middle" class="lbl">start(Sk)</text><line x1="486" y1="552" x2="582" y2="552" stroke="#111" stroke-width="1.1" stroke-dasharray="4 3"/><path d="M588 552 l-8 -4 v8 z" fill="#111"/><text x="538.0" y="547" text-anchor="middle" class="lbl">connect A  127.0.0.1:11443</text><line x1="486" y1="575" x2="143" y2="575" stroke="#111" stroke-width="1.1" stroke-dasharray="4 3"/><path d="M137 575 l8 -4 v8 z" fill="#111"/><text x="310.5" y="570" text-anchor="middle" class="lbl">connect B  data_tls_port 29393 + TLS, send Sk</text><g transform="translate(167.0,563)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><text x="141" y="590" text-anchor="start" class="note" fill="#555">Sk must be routed AND bound to the same channel type (tls) and client certificate – else closed</text><line x1="135" y1="611" x2="292" y2="611" stroke="#111" stroke-width="1.2"/><path d="M298 611 l-8 -4 v8 z" fill="#111"/><text x="217.5" y="606" text-anchor="middle" class="lbl">set B</text><rect x="4" y="625" width="737" height="17" fill="#f3f3f3" rx="3"/><text x="10" y="638" class="sec">3  Request   USER ⇄ GATEWAY end-to-end TLS through the tunnel</text><line x1="300" y1="658.5" x2="478" y2="658.5" stroke="#f5a623" stroke-width="1.3"/><line x1="300" y1="661.5" x2="478" y2="661.5" stroke="#f5a623" stroke-width="1.3"/><path d="M484 660 l-8 -4 v8 z" fill="#f5a623"/><text x="393.0" y="655" text-anchor="middle" class="lbl">ClientHello*</text><g transform="translate(345.2,648)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><line x1="486" y1="681.5" x2="582" y2="681.5" stroke="#f5a623" stroke-width="1.3"/><line x1="486" y1="684.5" x2="582" y2="684.5" stroke="#f5a623" stroke-width="1.3"/><path d="M588 683 l-8 -4 v8 z" fill="#f5a623"/><text x="538.0" y="678" text-anchor="middle" class="lbl">ClientHello</text><line x1="590" y1="706" x2="48" y2="706" stroke="#9b6bff" stroke-width="1.1" stroke-dasharray="4 3"/><path d="M42 706 l8 -4 v8 z" fill="#9b6bff"/><text x="315.0" y="701" text-anchor="middle" class="lbl">TLS handshake (gw.pem) – server/tunnel only see ciphertext</text><line x1="40" y1="727.5" x2="582" y2="727.5" stroke="#f5a623" stroke-width="1.3"/><line x1="40" y1="730.5" x2="582" y2="730.5" stroke="#f5a623" stroke-width="1.3"/><path d="M588 729 l-8 -4 v8 z" fill="#f5a623"/><text x="315.0" y="724" text-anchor="middle" class="lbl">POST /v1/chat/completions   Authorization: Bearer sk-xyl-…</text><text x="584" y="744" text-anchor="end" class="note" fill="#555">verify key: format+crc, sha256, disabled, expires, allow</text><line x1="590" y1="765" x2="697" y2="765" stroke="#111" stroke-width="1.2"/><path d="M703 765 l-8 -4 v8 z" fill="#111"/><text x="647.5" y="760" text-anchor="middle" class="lbl">forward, key removed</text><text x="647.5" y="776" text-anchor="middle" class="sub">Host rewritten · Connection: close</text><line x1="705" y1="794.5" x2="598" y2="794.5" stroke="#f0452a" stroke-width="1.3"/><line x1="705" y1="797.5" x2="598" y2="797.5" stroke="#f0452a" stroke-width="1.3"/><path d="M592 796 l8 -4 v8 z" fill="#f0452a"/><text x="647.5" y="791" text-anchor="middle" class="lbl">RESP (stream)</text><line x1="590" y1="817.5" x2="48" y2="817.5" stroke="#f0452a" stroke-width="1.3"/><line x1="590" y1="820.5" x2="48" y2="820.5" stroke="#f0452a" stroke-width="1.3"/><path d="M42 819 l8 -4 v8 z" fill="#f0452a"/><text x="315.0" y="814" text-anchor="middle" class="lbl">RESP</text><text x="584" y="834" text-anchor="end" class="note" fill="#555">missing / bad key → 401 JSON (OpenAI or Anthropic error style)</text><rect x="4" y="846" width="737" height="17" fill="#f3f3f3" rx="3"/><text x="10" y="859" class="sec">4  Keep alive</text><line x1="408" y1="879.5" x2="230" y2="879.5" stroke="#111" stroke-width="1.1"/><line x1="408" y1="882.5" x2="230" y2="882.5" stroke="#111" stroke-width="1.1"/><path d="M224 881 l8 -4 v8 z" fill="#111"/><text x="315.0" y="876" text-anchor="middle" class="lbl">ping</text><g transform="translate(290.4,869)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g><line x1="222" y1="902.5" x2="400" y2="902.5" stroke="#111" stroke-width="1.1"/><line x1="222" y1="905.5" x2="400" y2="905.5" stroke="#111" stroke-width="1.1"/><path d="M406 904 l-8 -4 v8 z" fill="#111"/><text x="315.0" y="899" text-anchor="middle" class="lbl">pong</text><g transform="translate(290.4,892)"><path d="M1.5 5 V3.2 a2.5 2.5 0 0 1 5 0 V5" fill="none" stroke="#1a7f1a" stroke-width="1.1"/><rect x="0" y="5" width="8" height="6" rx="1" fill="#1a7f1a"/></g></svg></div><div class="page">
+<h2>Deployment – where things live</h2>
+<svg viewBox="0 0 745 345" width="100%"><defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#333"/></marker></defs><rect x="10" y="20" width="150" height="150" rx="6" fill="#fff" stroke="#f5a623" stroke-width="2"/><rect x="10" y="20" width="150" height="20" rx="6" fill="#f5a623"/><rect x="10" y="32" width="150" height="8" fill="#f5a623"/><text x="18" y="34" class="box">USER</text><text x="20" y="56" class="dtxt">curl / OpenAI SDK</text><text x="20" y="70" class="dtxt">holds:</text><text x="20" y="84" class="mono">  sk-xyl-… api key</text><text x="20" y="98" class="mono">  gw.pem (if self-signed)</text><text x="20" y="112" class="dtxt">connects to</text><text x="20" y="126" class="mono">  xylan3.example:11443</text><rect x="205" y="20" width="230" height="230" rx="6" fill="#fff" stroke="#3ac43a" stroke-width="2"/><rect x="205" y="20" width="230" height="20" rx="6" fill="#3ac43a"/><rect x="205" y="32" width="230" height="8" fill="#3ac43a"/><text x="213" y="34" class="box">SERVER node (public)</text><text x="215" y="56" class="dtxt">xylan mode=server</text><text x="215" y="70" class="mono">:11443  user port (gateway route)</text><text x="215" y="84" class="mono">:22xx   user ports (ssh …)</text><text x="215" y="98" class="mono">:29392  client_tls_port</text><text x="215" y="112" class="mono">:29393  data_tls_port</text><text x="215" y="126" class="mono">:29390/1 old ports → none</text><text x="215" y="140" class="mono">/etc/xylan/</text><text x="215" y="154" class="mono">  xylan.config      0600</text><text x="215" y="168" class="mono">  server.pem</text><text x="215" y="182" class="mono">  server.key        0600</text><text x="215" y="196" class="mono">  (client cert: fingerprint only)</text><text x="215" y="210" class="dtxt">sees: ssh + TLS ciphertext only</text><rect x="480" y="20" width="255" height="300" rx="6" fill="#fff" stroke="#36c9ef" stroke-width="2"/><rect x="480" y="20" width="255" height="20" rx="6" fill="#36c9ef"/><rect x="480" y="32" width="255" height="8" fill="#36c9ef"/><text x="488" y="34" class="box">HOME node (client + service)</text><text x="490" y="56" class="dtxt">xylan mode=client</text><text x="490" y="70" class="dtxt">route {data,ssl} → 127.0.0.1:11443</text><text x="490" y="84" class="dtxt"></text><text x="490" y="98" class="dtxt">api gateway (xylan_gw)</text><text x="490" y="112" class="mono">:11443  TLS + api key check</text><text x="490" y="126" class="mono">  → ollama 127.0.0.1:11434</text><text x="490" y="140" class="dtxt"></text><text x="490" y="154" class="mono">/etc/xylan/</text><text x="490" y="168" class="mono">  xylan.config      0600</text><text x="490" y="182" class="mono">  gw.pem</text><text x="490" y="196" class="mono">  gw.key            0600</text><text x="490" y="210" class="mono">  home.pem</text><text x="490" y="224" class="mono">  home.key          0600 (client cert)</text><text x="490" y="238" class="mono">  api_keys.conf     0600 (hashes)</text><text x="490" y="252" class="dtxt"></text><text x="490" y="266" class="dtxt">ollama  127.0.0.1:11434</text><text x="490" y="280" class="mono">  (never exposed)</text><path d="M160 90 H205" stroke="#f5a623" stroke-width="2.5" fill="none" marker-end="url(#ah)"/><text x="182" y="84" text-anchor="middle" class="sub">TLS</text><path d="M480 120 H435" stroke="#36c9ef" stroke-width="2.5" fill="none" marker-end="url(#ah)"/><text x="457" y="114" text-anchor="middle" class="sub">TLS</text><text x="457" y="134" text-anchor="middle" class="sub">outbound</text><text x="330" y="290" text-anchor="middle" class="note">client connects OUT to the server – no inbound ports at home</text></svg>
+<h3>Files</h3>
+<table>
+<tr><th>file</th><th>node</th><th>contains</th><th>create with</th><th>secret?</th></tr>
+<tr><td><code>/etc/xylan/server.pem</code><br><code>/etc/xylan/server.key</code></td><td>server</td>
+<td>tunnel certificate, presented to xylan clients on 29392/29393</td>
+<td><code>xylan:generate_cert("server", [{dir,"/etc/xylan"}, {hosts,["xylan3.example"]}])</code> – prints the fingerprint</td>
+<td>.key yes (0600)</td></tr>
+<tr><td><code>/etc/xylan/gw.pem</code><br><code>/etc/xylan/gw.key</code></td><td>home</td>
+<td>gateway certificate presented to users; hosts = the public name users connect to</td>
+<td><code>xylan:generate_cert("gw", [{dir,"/etc/xylan"}, {hosts,["xylan3.example"]}])</code> or a Let's Encrypt certificate (DNS-01)</td>
+<td>.key yes (0600)</td></tr>
+<tr><td><code>/etc/xylan/home.pem</code><br><code>/etc/xylan/home.key</code></td><td>home</td>
+<td>optional tunnel client certificate; the server stores only its fingerprint (<code>client_cert</code>)</td>
+<td><code>xylan:generate_cert("home", [{dir,"/etc/xylan"}, {usage,client}])</code></td>
+<td>.key yes (0600)</td></tr>
+<tr><td><code>/etc/xylan/api_keys.conf</code></td><td>home</td>
+<td>api key ids and <b>sha256 hashes</b> only, name, created, expires, allow, disabled</td>
+<td><code>xylan:generate_api_key("tony-laptop")</code>, <code>xylan:revoke_api_key(Id)</code>, <code>xylan:list_api_keys()</code></td>
+<td>no secrets, keep 0600</td></tr>
+<tr><td><code>xylan.config</code> (server)</td><td>server</td><td>per client <code>server_key</code>/<code>client_key</code>, <code>require_tls</code>, routes, tls ports</td>
+<td>keys: <code>xylan:generate_key(256)</code> – not needed for a client using only a client certificate</td><td>yes (0600)</td></tr>
+<tr><td><code>xylan.config</code> (client)</td><td>home</td><td>same two keys, <code>server_tls</code> fingerprint, routes, <code>api_gateways</code>, <code>api_key_file</code></td>
+<td></td><td>yes (0600)</td></tr>
+</table>
+<h3>What the user needs</h3>
+<pre># the api key is shown ONCE by xylan:generate_api_key/1
+curl --cacert gw.pem -H "Authorization: Bearer sk-xyl-…" https://xylan3.example:11443/api/tags
+
+# OpenAI compatible SDKs (ollama /v1)
+export OPENAI_BASE_URL=https://xylan3.example:11443/v1
+export OPENAI_API_KEY=sk-xyl-…
+export SSL_CERT_FILE=gw.pem          # only for a self-signed gw certificate</pre>
+<h3>What each party can see</h3>
+<ul>
+<li><b>Network between client and server</b>: only TLS. Session keys, route info and auth are inside the tunnel.</li>
+<li><b>xylan server</b>: ssh and the user's TLS stream as ciphertext – never api keys or prompts.</li>
+<li><b>Gateway (home)</b>: plaintext HTTP, checks the key, removes it, forwards to ollama on localhost.</li>
+<li><b>Ollama</b>: only reachable on 127.0.0.1, sees requests without api keys.</li>
+</ul>
+</div><div class="page">
+<h2>Configuration reference</h2>
+<div class="cols"><div>
+<h3>Server (public node)</h3>
+<pre>{xylan,
+ [{mode, server},
+  {id, "xylan3"},
+  {port, [{ssh, "0.0.0.0", 46122},
+          {ollama, "0.0.0.0", 11443}]},
+  {client_port, 29390},      %% old, → none
+  {data_port,   29391},      %% old, → none
+  {client_tls_port, 29392},
+  {data_tls_port,   29393},
+  {tls_options,
+   [{certfile, "/etc/xylan/server.pem"},
+    {keyfile,  "/etc/xylan/server.key"}]},
+  {max_tls_handshakes, 64},
+  {max_tls_handshakes_per_ip, 8},
+  {clients,
+   [{"home",
+     [{client_cert, "sha256:9A:3F:…"},
+      %% and/or shared keys (both = cert+hmac)
+      %% {server_key, 16#…256 bit…},
+      %% {client_key, 16#…256 bit…},
+      {require_tls, true},  %% implied by client_cert
+      {route, [[{data, "SSH-2.0.*"}],
+               [{dst_port, 11443}]]}]}]}]}</pre>
+</div><div>
+<h3>Client (home node)</h3>
+<pre>{xylan,
+ [{mode, client},
+  {id, "home"},
+  {server_ip, "xylan3.example"},
+  {server_port, 29392},
+  {server_tls,
+   [{fingerprint, "sha256:21:09:88:…"},
+    {certfile, "/etc/xylan/home.pem"},
+    {keyfile,  "/etc/xylan/home.key"}]},
+  %% {server_key, 16#…}, {client_key, 16#…},
+  {route,
+   [{ [{data, "SSH-2.0.*"}], [{port, 22}] },
+    { [{data, ssl}],         [{port, 11443}] }]},
+
+  {api_key_file, "/etc/xylan/api_keys.conf"},
+  {api_gateways,
+   [{ollama,
+     [{port, 11443}, {ip, {127,0,0,1}},
+      {target, {"127.0.0.1", 11434}},
+      {tls, [{certfile, "/etc/xylan/gw.pem"},
+             {keyfile,  "/etc/xylan/gw.key"}]},
+      {host, rewrite},
+      {max_connections, 64}]}]}]}</pre>
+</div></div>
+
+<h3>API key format</h3>
+<div class="key"><span style="background:#eee">sk-xyl-</span><span style="background:#d9f5ff">LiOSGdJ4</span>-<span style="background:#ffe9c7">S3mDjsLEhKhsJyOgBozZs1dh7Qes4mm1uyLKrcvYXUs</span><span style="background:#e7dcff">0ivUUp</span></div>
+<p style="text-align:center">prefix · <b>id</b> (8 base62, public, used in logs/revoke) · <b>secret</b> (43 base62 = 256 bit) · <b>crc32</b> (6 base62, catches typos).
+Stored as <code>{"LiOSGdJ4", [{name,"ci"}, {hash,"sha256:…"}, {created,…}, {expires,{2027,6,30}}, {allow,[ollama]}]}</code>.
+Accepted as <code>Authorization: Bearer …</code> or <code>x-api-key: …</code>.</p>
+
+<div class="cols"><div>
+<h3>Migration of existing nodes</h3>
+<ol style="padding-left:16px">
+<li>Server: <code>generate_cert("server", …)</code>, add tls ports + <code>tls_options</code>. Old ports keep working.</li>
+<li>Per client: new keys <code>generate_key(256)</code> on both sides, <code>server_tls</code> with the fingerprint on the client, <code>{require_tls,true}</code> on the server.</li>
+<li>Optional: <code>generate_cert("home", [{usage,client}])</code> on the client, add <code>certfile/keyfile</code> to <code>server_tls</code>, put the printed fingerprint as <code>client_cert</code> on the server, then remove the shared keys on both sides.</li>
+<li>When all clients are upgraded: <code>{client_port,none}</code>, <code>{data_port,none}</code>.</li>
+</ol>
+</div><div>
+<h3>Security properties</h3>
+<ul>
+<li>Session key bound to channel type; must be routed before use.</li>
+<li>Auth: HMAC-SHA256 with role labels, constant time compare, and/or pinned client certificate – then the server holds no client secret.</li>
+<li>Data connections must present the same client certificate as the control channel.</li>
+<li>A connecting socket can not close an active session before it authenticates.</li>
+<li>TLS handshakes in separate processes, capped total and per ip.</li>
+<li>Gateway: one request per connection, key headers removed, obs-fold rejected.</li>
+</ul>
+</div></div>
+</div></body></html>

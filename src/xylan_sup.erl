@@ -46,5 +46,8 @@ init([]) ->
 	    {ok,server} ->
 		?CHILD(xylan_srv, [], worker)
 	end,
-    {ok, { {one_for_one, 5, 10}, [Child]} }.
+    Gateways = [{{xylan_gw,Name}, {xylan_gw, start_link, [Name, Opts]},
+		 permanent, 5000, worker, [xylan_gw]} ||
+		   {Name, Opts} <- application:get_env(xylan, api_gateways, [])],
+    {ok, { {one_for_one, 5, 10}, [Child | Gateways]} }.
 

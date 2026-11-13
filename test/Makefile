@@ -3,7 +3,8 @@
 #
 
 MODULES = \
-	xylan_SUITE 
+	xylan_SUITE \
+	xylan_tls_SUITE
 
 
 EBIN = .
@@ -23,6 +24,12 @@ debug: all
 
 depend:
 	edep -MM -o ../ebin $(ERLC_FLAGS) $(MODULES:%=%.erl) > depend.mk
+
+# run the automatic test suite (xylan_SUITE is an interactive dev setup)
+ct:
+	mkdir -p ../logs/ct
+	ct_run -noshell -dir . -suite xylan_tls_SUITE -pa ../ebin \
+	       -logdir ../logs/ct -cover_stop false
 
 clean:
 	rm -f $(OBJS) 

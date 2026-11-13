@@ -79,7 +79,7 @@
 	  %% undefined = legacy plain tcp + sha auth
 	  %% {SslOpts,Fingerprint} = tls (control and data) + hmac_sha256 auth
 	  tls :: undefined | {list(), string() | undefined},
-	  auth_alg = sha :: sha | hmac_sha256,
+	  auth_alg = sha :: sha | hmac_sha256 | cert,
 	  ping_interval = ?DEFAULT_PING_INTERVAL :: timeout(),
 	  pong_timeout  = ?DEFAULT_PONG_TIMEOUT  :: timeout(),
 	  session_time :: erlang:timestamp(),
@@ -175,9 +175,24 @@ init(Args0) ->
     Authtimeout = proplists:get_value(auth_timeout,Args),
     {Tls,AuthAlg} =
 	case proplists:get_value(server_tls,Args) of
+	    undefined when ClientKey =:= undefined; ServerKey =:= undefined ->
+		?error("server_key and client_key required without server_tls"),
+		erlang:error(missing_credentials);
 	    undefined -> {undefined, sha};
 	    TlsConf when is_list(TlsConf) ->
-		{xylan_lib:tls_client_options(TlsConf), hmac_sha256}
+		HasCert = proplists:is_defined(certfile, TlsConf) orelse
+		    proplists:is_defined(cert, TlsConf),
+		%% without shared keys the client certificate is the
+		%% only client credential
+		Alg = if ClientKey =:= undefined, ServerKey =:= undefined,
+			 HasCert -> cert;
+			 ClientKey =:= undefined; ServerKey =:= undefined ->
+			      ?error("server_key/client_key or client "
+				     "certificate (certfile) required"),
+			      erlang:error(missing_credentials);
+			 true -> hmac_sha256
+		      end,
+		{xylan_lib:tls_client_options(TlsConf), Alg}
 	end,
     ASocketOpts = xylan_lib:filter_options(client,
 					   proplists:get_value(service_socket_options,Args,[])),

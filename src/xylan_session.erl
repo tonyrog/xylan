@@ -51,7 +51,7 @@
 -record(pending, {
 	  socket :: xylan_socket:xylan_socket(),
 	  tls = false :: boolean(),
-	  alg = sha :: sha | hmac_sha256,
+	  alg = sha :: sha | hmac_sha256 | cert,
 	  chal :: binary(),       %% our challenge to the client
 	  timer :: timer(),       %% auth timeout
 	  tags :: {atom(),atom(),atom()}
@@ -65,6 +65,8 @@
 	  client_auth = false :: boolean(), %% true when socket is authenticated
 	  tls = false :: boolean(),          %% active control channel is tls
 	  require_tls = false :: boolean(),  %% only accept tls+hmac_sha256
+	  %% pinned client certificate, verified by xylan_srv before handover
+	  client_cert :: undefined | string(),
 	  auth_timeout :: timeout(),
 	  ping_timeout :: timeout(),
 	  ping_timer :: timer(),
@@ -169,6 +171,8 @@ handle_cast({set_config,Conf}, State) ->
 	     ({ping_timeout,T}, S)   -> S#state { ping_timeout = T };
 	     ({require_tls,B}, S) when is_boolean(B) ->
 		  S#state { require_tls = B };
+	     ({client_cert,FP}, S) ->
+		  S#state { client_cert = FP };
 	     (Item, S) ->
 		  ?warning("bad config item ~p", [Item]),
 		  S
@@ -192,12 +196,21 @@ handle_cast({auth_socket, Socket, Tls, {auth_req,Props}}, State)
 	    ?warning("client ~p bad challenge", [ID]),
 	    close(Socket),
 	    {noreply, State};
-       Alg =/= sha, Alg =/= hmac_sha256 ->
+       Alg =/= sha, Alg =/= hmac_sha256, Alg =/= cert ->
 	    ?warning("client ~p unsupported auth alg ~p", [ID, Alg]),
 	    close(Socket),
 	    {noreply, State};
-       State#state.require_tls, (Alg =/= hmac_sha256 orelse not Tls) ->
-	    ?warning("client ~p requires tls and hmac_sha256 (tls=~w alg=~w)",
+       Alg =:= cert, (State#state.client_cert =:= undefined orelse not Tls) ->
+	    ?warning("client ~p cert auth without client_cert", [ID]),
+	    close(Socket),
+	    {noreply, State};
+       Alg =/= cert, (State#state.server_key =:= undefined orelse
+		      State#state.client_key =:= undefined) ->
+	    ?warning("client ~p has no keys, use client certificate", [ID]),
+	    close(Socket),
+	    {noreply, State};
+       State#state.require_tls, (Alg =:= sha orelse not Tls) ->
+	    ?warning("client ~p requires tls and hmac_sha256/cert (tls=~w alg=~w)",
 		     [ID, Tls, Alg]),
 	    close(Socket),
 	    {noreply, State};
@@ -225,7 +238,8 @@ handle_cast({route,{DataPort,DataTlsPort},SessionKey,RouteInfo}, State) when
     Port = if Tls -> DataTlsPort; true -> DataPort end,
     if is_integer(Port) ->
 	    gen_server:cast(State#state.parent,
-			    {session_bound, SessionKey, Tls}),
+			    {session_bound, SessionKey, Tls,
+			     State#state.client_cert}),
 	    send(State#state.socket,{route,Port,SessionKey,RouteInfo});
        true ->
 	    ?warning("client ~p no data port available (tls=~w)",
