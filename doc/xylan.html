@@ -92,15 +92,16 @@ export SSL_CERT_FILE=gw.pem          # only for a self-signed gw certificate</pr
   {data_tls_port,   29393},
   {tls_options,
    [{certfile, "/etc/xylan/server.pem"},
-    {keyfile,  "/etc/xylan/server.key"}]},
+    {keyfile,  "/etc/xylan/server.key"},
+    {password, {env, "XYLAN_KEY_PASSWORD"}}]},
   {max_tls_handshakes, 64},
   {max_tls_handshakes_per_ip, 8},
   {clients,
    [{"home",
      [{client_cert, "sha256:9A:3F:…"},
       %% and/or shared keys (both = cert+hmac)
-      %% {server_key, 16#…256 bit…},
-      %% {client_key, 16#…256 bit…},
+      %% {server_key, &lt;xylan:generate_key(256)&gt;},
+      %% {client_key, &lt;xylan:generate_key(256)&gt;},
       {require_tls, true},  %% implied by client_cert
       {route, [[{data, "SSH-2.0.*"}],
                [{dst_port, 11443}]]}]}]}]}</pre>
@@ -115,7 +116,7 @@ export SSL_CERT_FILE=gw.pem          # only for a self-signed gw certificate</pr
    [{fingerprint, "sha256:21:09:88:…"},
     {certfile, "/etc/xylan/home.pem"},
     {keyfile,  "/etc/xylan/home.key"}]},
-  %% {server_key, 16#…}, {client_key, 16#…},
+  %% {server_key, …}, {client_key, …},
   {route,
    [{ [{data, "SSH-2.0.*"}], [{port, 22}] },
     { [{data, ssl}],         [{port, 11443}] }]},
@@ -138,10 +139,45 @@ Stored as <code>{"LiOSGdJ4", [{name,"ci"}, {hash,"sha256:…"}, {created,…}, {
 Accepted as <code>Authorization: Bearer …</code> or <code>x-api-key: …</code>.</p>
 
 <div class="cols"><div>
+<h3>Key passwords</h3>
+<pre>xylan:generate_cert("server", [{dir,"/etc/xylan"},
+                               {password,"long passphrase"}]).
+
+{password, {env,  "XYLAN_KEY_PASSWORD"}}
+{password, {file, "/run/credentials/xylan.service/keypw"}}
+{password, "plain"}          %% not recommended</pre>
+<ul>
+<li>Encrypts the <b>key file</b> (AES-256-CBC): protects copies – backups, disk images, a lost SD card.</li>
+<li>Only useful if the password is stored <b>elsewhere than the key</b>: environment, systemd <code>LoadCredential(Encrypted)=</code>. In <code>xylan.config</code> next to the key it adds nothing.</li>
+<li>Works in <code>tls_options</code> (server), <code>server_tls</code> (client cert) and gateway <code>tls</code>.</li>
+</ul>
+</div><div>
+<h3>Rotating certificates</h3>
+<p><code>fingerprint</code> (client) and <code>client_cert</code> (server) accept a <b>list</b> – old and new are both accepted during the change.</p>
+<table>
+<tr><th>server certificate</th><th>client certificate</th></tr>
+<tr><td>
+<ol style="padding-left:14px;margin:0">
+<li>create <code>server-2027.pem/.key</code></li>
+<li>clients: <code>{fingerprint, [Old, New]}</code>, restart</li>
+<li>server: <code>tls_options</code> → new files, restart</li>
+<li>clients: remove <code>Old</code></li>
+</ol></td><td>
+<ol style="padding-left:14px;margin:0">
+<li>client: create <code>home-2027.pem/.key</code></li>
+<li>server: <code>{client_cert, [Old, New]}</code>, restart</li>
+<li>client: <code>certfile/keyfile</code> → new, restart</li>
+<li>server: remove <code>Old</code></li>
+</ol></td></tr>
+</table>
+<p><b>Revoke</b> a lost client: remove its fingerprint (and keys) on the server, restart.</p>
+</div></div>
+
+<div class="cols"><div>
 <h3>Migration of existing nodes</h3>
 <ol style="padding-left:16px">
 <li>Server: <code>generate_cert("server", …)</code>, add tls ports + <code>tls_options</code>. Old ports keep working.</li>
-<li>Per client: new keys <code>generate_key(256)</code> on both sides, <code>server_tls</code> with the fingerprint on the client, <code>{require_tls,true}</code> on the server.</li>
+<li>Per client: new keys <code>generate_key(256)</code> on both sides (printed in decimal and as <code>16#…</code> hex – the same key, paste either), <code>server_tls</code> with the fingerprint on the client, <code>{require_tls,true}</code> on the server.</li>
 <li>Optional: <code>generate_cert("home", [{usage,client}])</code> on the client, add <code>certfile/keyfile</code> to <code>server_tls</code>, put the printed fingerprint as <code>client_cert</code> on the server, then remove the shared keys on both sides.</li>
 <li>When all clients are upgraded: <code>{client_port,none}</code>, <code>{data_port,none}</code>.</li>
 </ol>

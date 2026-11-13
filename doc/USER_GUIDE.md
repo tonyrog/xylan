@@ -153,7 +153,20 @@ When TLS works for the laptop:
 
 1. Give it new 256-bit keys, `xylan:generate_key(256)` (twice, one for
    `server_key` and one for `client_key`), the same values on both sides.
-   Integers that big can be written as `16#...` in the config.
+   The key is printed in two forms, decimal and hex. They are the same
+   key; paste either one into the config:
+   ```erlang
+   1> xylan:generate_key(256).
+   decimal: 59659307909770683321564084784431556580882190118024054427101833046974652398080
+   hex:     16#83E5F8BE725EF5D05073320AD4E977B1C926D23E2C4C859EBE078C15E2B2BA00
+   59659307909770683321564084784431556580882190118024054427101833046974652398080
+   ```
+   ```erlang
+   {server_key, 16#83E5F8BE725EF5D05073320AD4E977B1C926D23E2C4C859EBE078C15E2B2BA00},
+   ```
+   Do not put `16#` in front of the *decimal* digits – that is a
+   different number. To convert an existing decimal key:
+   `"16#" ++ integer_to_list(Key, 16)`.
 2. Add `{require_tls, true}` to the laptop's entry on the server. From
    now on the server refuses this client id on the old port and refuses
    the old SHA1 authentication.
@@ -380,7 +393,7 @@ proofs.
 3. **On the server**, add the client's fingerprint to its entry:
    ```erlang
    {"home", [{client_cert, "sha256:9A:3F:..."},
-             {server_key, 16#...}, {client_key, 16#...},   %% still there
+             {server_key, ...}, {client_key, ...},   %% still there
              {route, [...]}]}
    ```
    `client_cert` implies `require_tls`.
@@ -588,7 +601,7 @@ Per client entry:
 
 | Function | |
 |----------|---|
-| `xylan:generate_key(256)` | random 256-bit key for `server_key`/`client_key` |
+| `xylan:generate_key(256)` | random 256-bit key for `server_key`/`client_key`, printed in decimal and hex |
 | `xylan:generate_cert(Name, Opts)` | self-signed certificate + key, prints fingerprint |
 | `xylan:cert_fingerprint(File)` | fingerprint of a certificate file |
 | `xylan:generate_api_key(Name [, Opts])` | new API key |

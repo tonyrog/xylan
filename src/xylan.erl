@@ -86,13 +86,12 @@ display_prop({K,V}) ->
 generate_key() ->
     generate_key(64).
 
-%% Generate a random key, use 256 for clients using tls/hmac_sha256
-%% (big integer, may be written as 16#... in the config file)
-generate_key(64) ->
-    <<X:64>> = crypto:strong_rand_bytes(8),
-    X;
-generate_key(256) ->
-    <<X:256>> = crypto:strong_rand_bytes(32),
+%% Generate a random key, use 256 for clients using tls/hmac_sha256.
+%% Prints the key in decimal and hex form, both may be pasted into the
+%% config as server_key/client_key (they are the same key).
+generate_key(Bits) when Bits =:= 64; Bits =:= 256 ->
+    <<X:Bits>> = crypto:strong_rand_bytes(Bits div 8),
+    io:format("decimal: ~w\nhex:     16#~s\n", [X, integer_to_list(X, 16)]),
     X.
 
 %% Generate a new api key. If api_key_file is configured the key is
